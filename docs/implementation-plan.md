@@ -1,0 +1,183 @@
+# Implementation Plan
+
+Status: proposed. Work begins only after approval. No application code, dependencies, or tooling have been added.
+
+## Ground rules
+
+- Each milestone is independently verifiable and ends with a working build.
+- Run `pnpm typecheck`, `pnpm lint`, `pnpm test`, and relevant E2E checks before marking a milestone complete.
+- Add tests for business logic in the same milestone as the logic.
+- Automated tests never call the live GitHub API.
+- Pin stable, compatible package versions at M1, commit the lockfile, and avoid unnecessary dependencies.
+- No permission, scope, or architecture changes without updating the docs and getting approval.
+- New dependencies require a stated reason and approval.
+
+## M0 - Feasibility spikes
+
+Timeboxed, throwaway validation. Findings are recorded before building the product.
+
+### Goals
+
+1. Confirm a current stable WXT + React + TypeScript + Tailwind CSS setup builds a Chrome MV3 extension.
+2. Confirm Playwright can load the built extension in a persistent Chromium context and determine a deterministic way to mock `api.github.com` requests made by the service worker.
+3. Confirm that opening the popup under `activeTab` exposes the active tab URL, including on GitHub issue and PR pages.
+4. Record exact package versions and any fallback decisions.
+
+### Acceptance
+
+- A minimal extension builds and loads unpacked in Chrome.
+- Playwright either intercepts the service-worker request path, or the documented fallback is chosen: keep the GitHub client under injected-`fetch` unit tests and drive E2E from deterministic storage/state setup.
+- `activeTab` behavior is verified. If it is insufficient, explicit URL input is proposed as a product change rather than adding `tabs`.
+- Findings and version choices are added to the docs.
+
+## M1 - Foundation
+
+Depends on M0.
+
+### Deliverables
+
+- Scaffold WXT + React + TypeScript in strict mode using pnpm.
+- Tailwind CSS with monochrome design tokens.
+- Manifest with only `storage`, `activeTab`, and `https://api.github.com/*` host access.
+- Popup and dashboard HTML entrypoints with a minimal shell; background service worker stub.
+- ESLint, Vitest, Playwright configuration, and `package.json` scripts.
+- Proposed directory structure from `docs/architecture.md`, with no empty placeholder modules.
+- `.gitignore`, lockfile, and updated command documentation.
+
+### Acceptance
+
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, and `pnpm zip` succeed.
+- The unpacked build loads in Chrome without manifest errors.
+- Popup and dashboard open and render the monochrome shell.
+- The installed permission list matches the architecture document.
+- No storage, GitHub, or feature logic is implemented yet.
+
+## M2 - Domain and persistence
+
+Depends on M1.
+
+### Deliverables
+
+- Data types, validators, canonical key/URL helpers, and PR state derivation.
+- `parseGitHubUrl` with a documented accepted-URL matrix.
+- Storage key helpers, read/write repository contract, Chrome adapter, in-memory adapter, schema metadata, and migration runner/version check.
+- Snapshot loading with isolated validation, invalid-record warnings, orphan-note warnings, and typed load errors.
+- Colocated unit tests.
+
+### Acceptance
+
+- URL tests cover issue/PR URLs, PR subpaths, query/fragment, trailing slashes, case, unsupported hosts, reserved paths, and malformed numbers.
+- Validator tests reject every invalid field combination and verify id/URL/key consistency.
+- Round-trip tests prove valid records survive save/load.
+- Corrupt records remain in storage, are skipped, and produce warnings.
+- Missing metadata, newer schema versions, migration failures, and storage quota errors are surfaced with typed errors.
+- `src/domain` imports no React, WXT, or Chrome APIs; only the Chrome adapter touches `chrome.storage`.
+
+## M3 - GitHub client and background commands
+
+Depends on M2.
+
+### Deliverables
+
+- GitHub REST client with injected `fetch`, 10-second abort timeout, DTO guards, mapping, and typed errors (`not_found`, `rate_limited`, `network`, `timeout`, `invalid_response`, `server`).
+- Rate-limit reset extraction and user-facing, bounded error messages.
+- Typed message contracts with runtime payload validation and a result envelope.
+- Background handlers for save issue, track/refresh PR, refresh issue, remove issue (with note), remove PR, save note, and delete note.
+- Serialized mutation queue, idempotency, and in-flight refresh coalescing.
+
+### Acceptance
+
+- Fake-`fetch` tests cover success, 404, 403 rate limit, 429, 5xx, network failure, timeout, and malformed payloads.
+- Failed metadata fetch still persists a reference with `unknown` state, null title, and a sync error; an existing successful snapshot is retained on refresh failure.
+- Duplicate save/track is idempotent and never overwrites notes.
+- Removing an issue removes its note in one storage operation.
+- Concurrent commands do not lose updates.
+- No raw GitHub response is persisted; no request headers or secrets are stored.
+- UI code has no write access or direct GitHub access; the background is the only writer.
+
+## M4 - Popup workflow
+
+Depends on M3.
+
+### Deliverables
+
+- Read the active tab URL through `activeTab`; show a target card for supported issue/PR pages.
+- Save issue and track PR actions with loading, success, already-saved, and error states.
+- Unsupported-page empty state with guidance.
+- Rate-limit/private/deleted-target messaging while preserving the saved reference.
+- Link to the dashboard and basic saved counts.
+- Component tests for popup states.
+
+### Acceptance
+
+- On a GitHub issue URL, save persists the issue and dashboard data updates.
+- On a GitHub PR URL, track persists the PR.
+- Duplicate opens show the saved state without creating duplicates or changing notes.
+- Non-GitHub, `chrome://`, and unsupported GitHub pages show actionable empty states.
+- API failure still yields a saved reference and a visible warning.
+- Permission and network inspection confirms only `api.github.com` is contacted, only after user action.
+
+## M5 - Dashboard
+
+Depends on M4.
+
+### Deliverables
+
+- Issues list (newest first) with metadata, state, sync status, and refresh action.
+- Inline note editor for saved issues: view, edit, explicit save, delete, validation, and errors.
+- Pull requests list (newest first) with state, sync status, refresh, and untrack.
+- Remove issue/PR confirmation that also removes the note.
+- Loading, empty, error, warning, and per-item busy states.
+- Live updates through `chrome.storage.onChanged`.
+- Responsive monochrome layout, keyboard support, visible focus, and non-color-only state labels.
+- Component tests for the note editor, lists, and key states.
+
+### Acceptance
+
+- Notes persist across popup/dashboard reloads and never trigger network requests.
+- Removing an issue removes its note; untracking a PR removes it.
+- Refresh updates title/state/timestamps and clears the previous sync error on success.
+- Invalid-record and orphan-note warnings are visible without deleting data.
+- Keyboard-only use is possible; focus order and contrast are checked.
+- Layout works at narrow popup-like widths and on a full dashboard tab.
+
+## M6 - End-to-end, hardening, release candidate
+
+Depends on M5.
+
+### Deliverables
+
+- Playwright E2E using the agreed deterministic API strategy:
+  - save an issue and see it in the dashboard,
+  - add a note and verify persistence after reload,
+  - track a PR and refresh to `merged`,
+  - handle a rate-limited response while preserving the reference,
+  - remove an issue and verify the note is gone.
+- Accessibility, permission, CSP, and network audits.
+- Final docs update and production build/zip.
+- Manual smoke test on a clean Chrome profile with a real public issue and PR (non-CI).
+
+### Acceptance
+
+- All E2E tests pass offline and deterministically.
+- All quality commands pass: typecheck, lint, unit tests, E2E, build, zip.
+- Loading the zip in a clean profile causes no console or manifest errors.
+- Network inspection shows no requests except explicit GitHub API reads.
+- Saved issues, notes, and PRs survive browser restart.
+- No secrets, telemetry, raw responses, or new permissions are present.
+- Documentation matches the shipped behavior.
+
+## Global definition of done
+
+A milestone is done only when:
+
+- Its acceptance criteria are met and actually exercised.
+- New logic has tests, and no `any` is used without a documented justification.
+- Typecheck, lint, and relevant tests pass.
+- Permissions and dependency changes are reviewed and documented.
+- Loading, empty, error, and disabled states are handled in the UI.
+- Planning docs stay accurate.
+
+## Deferred until after the MVP
+
+Search, filtering, tags, multiple notes, notifications, background polling, auto-refresh, review/CI status, import/export, sync, authentication, private repository metadata, Firefox support, and any GitHub write operation.

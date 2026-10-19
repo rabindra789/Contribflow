@@ -1,0 +1,254 @@
+# ContribFlow Architecture
+
+Status: proposed. Awaiting approval before implementation. No application code exists yet.
+
+## Goals
+
+The MVP lets an individual contributor:
+
+1. Save the GitHub issue open in the active tab.
+2. Keep one private note per saved issue.
+3. Track selected pull requests.
+4. Refresh issue and pull request metadata on demand.
+5. View, remove, and manage everything in a local dashboard.
+
+All user data stays in `chrome.storage.local`. The extension works with saved data without a network connection; metadata refresh requires GitHub.
+
+## Non-goals
+
+- Accounts, OAuth, personal access tokens, or private repository metadata.
+- A backend, sync, payments, analytics, telemetry, or AI services.
+- Notifications, background polling, tags, search, or multiple notes per issue.
+- CI, review, or mergeability status for pull requests.
+- GitHub writes such as commenting, starring, or closing.
+- GitHub Enterprise, Firefox, or non-Chrome browsers.
+- Reading or modifying the GitHub DOM.
+
+## System context
+
+```text
+Popup / Dashboard (React)
+        |
+        | typed messages (writes and GitHub operations)
+        v
+Background service worker
+        |                    \
+        |                     \ anonymous HTTPS
+        v                      v
+chrome.storage.local      api.github.com
+        ^
+        | reads + onChanged
+        |
+Popup / Dashboard
+```
+
+The GitHub website is used only as the source of the active tab URL. No host permission is requested for `github.com`, and no content script is injected.
+
+## Layers and boundaries
+
+| Layer | Responsibility | May import |
+| --- | --- | --- |
+| `entrypoints` | Popup, dashboard, background wiring | All application layers |
+| `components` | Presentational React UI and design-system primitives | `domain` types, `lib`; never storage, GitHub, or Chrome APIs |
+| `hooks` | React data/state hooks; load snapshots, subscribe to changes, send messages | `storage` read API, `messaging`, `domain` |
+| `messaging` | Discriminated request/response contracts and typed client | `domain` types only |
+| `domain` | Types, validators, URL parsing, key rules, status derivation, sorting | TypeScript standard library only |
+| `storage` | Repository contract, Chrome adapter, key layout, migrations | `domain`; Chrome/WXT APIs only in the adapter |
+| `github` | REST client, response mapping, error taxonomy; injected `fetch` | `domain` types |
+
+Rules:
+
+- UI never writes to storage directly and never calls GitHub. It reads through the repository and listens for changes.
+- All mutations and all GitHub requests are handled by the background service worker.
+- Only `src/storage/chrome-storage.ts` touches `chrome.storage`; only `src/github/client.ts` calls `fetch`.
+- `src/domain` stays pure and fully unit-testable without browser APIs.
+- The background serializes mutations through an in-process queue. The queue is not the source of truth; every command re-reads storage.
+
+## Proposed directory structure
+
+```text
+.
+├─ AGENTS.md
+├─ docs/
+│  ├─ architecture.md
+│  ├─ data-models.md
+│  └─ implementation-plan.md
+├─ src/
+│  ├─ entrypoints/
+│  │  ├─ background.ts
+│  │  ├─ popup/
+│  │  │  ├─ index.html
+│  │  │  ├─ main.tsx
+│  │  │  └─ App.tsx
+│  │  └─ dashboard/
+│  │     ├─ index.html
+│  │     ├─ main.tsx
+│  │     └─ App.tsx
+│  ├─ components/
+│  │  ├─ ui/                  # Button, Input, Textarea, StatusBadge, etc.
+│  │  └─ features/            # IssueList, PullRequestList, NoteEditor, TargetCard
+│  ├─ domain/
+│  │  ├─ models.ts
+│  │  ├─ validation.ts
+│  │  ├─ github-url.ts
+│  │  └─ pull-request-state.ts
+│  ├─ storage/
+│  │  ├─ keys.ts
+│  │  ├─ repository.ts
+│  │  ├─ chrome-storage.ts
+│  │  ├─ migrations.ts
+│  │  └─ warnings.ts
+│  ├─ github/
+│  │  ├─ client.ts
+│  │  ├─ mapping.ts
+│  │  └─ errors.ts
+│  ├─ messaging/
+│  │  ├─ contracts.ts
+│  │  └─ background-client.ts
+│  ├─ hooks/
+│  ├─ lib/
+│  └─ styles/
+│     └─ main.css
+├─ e2e/
+├─ wxt.config.ts
+├─ vitest.config.ts
+├─ playwright.config.ts
+├─ eslint.config.js
+├─ tsconfig.json
+└─ package.json
+```
+
+Unit tests are colocated as `*.test.ts` / `*.test.tsx`. Playwright tests live in `e2e/`.
+
+## Core flows
+
+### Save an issue
+
+1. The user opens the popup. `activeTab` grants temporary access to the active tab.
+2. The popup reads the tab URL and runs `parseGitHubUrl`. Unsupported pages show an empty state with guidance.
+3. The popup sends `SAVE_ISSUE` with the parsed owner, repo, and number.
+4. The background fetches public issue metadata with a timeout, then writes a `SavedIssue` keyed by canonical id.
+5. If metadata cannot be fetched (rate limit, private repository, offline, malformed response), the issue is still saved as a reference with `state: "unknown"`, `title: null`, and a bounded `lastSyncError`. The UI explains that metadata will appear after a manual refresh.
+6. The popup shows success; the dashboard updates through `chrome.storage.onChanged`.
+
+Duplicate saves are idempotent and never overwrite an existing note.
+
+### Track a pull request
+
+Same flow, using the pull request endpoint and a `TrackedPullRequest` record. Presence of the record means "tracked"; removing it means "untracked".
+
+### Refresh metadata
+
+- Triggered only by an explicit user action on one item.
+- The background fetches fresh metadata and updates `title`, `state`, `lastSyncedAt`, and `lastSyncError` while preserving local timestamps.
+- Rate limits, timeouts, 404s, and malformed responses are surfaced in the UI. There are no automatic retries or background polling.
+- Refreshing the same target while a request is in flight is coalesced.
+
+### Notes
+
+- The dashboard note editor edits the single note for a saved issue.
+- Saving is explicit. Empty notes are rejected; deletion uses a separate action.
+- Notes are stored separately from the issue and are never sent to GitHub.
+- Removing an issue removes its note in the same storage operation.
+
+### Dashboard load
+
+1. The dashboard calls `loadSnapshot` on the repository.
+2. Each record is validated independently. Valid records render; invalid records remain in storage and produce a visible warning; orphan notes produce a warning and are not shown.
+3. The dashboard subscribes to storage changes and re-reads the snapshot after relevant changes (small dataset, no incremental cache required).
+
+## Persistence summary
+
+- Storage area: `chrome.storage.local` only. `storage.sync` is not used.
+- Layout: one versioned storage key per entity, plus a metadata key. This avoids whole-document lost updates between the popup and dashboard.
+- Keys and record rules: see `docs/data-models.md`.
+- Reads validate every record. Invalid data is skipped, never deleted automatically.
+- Writes are centralized in the background service worker and serialized. No cross-context write races.
+- Schema version is stored explicitly. Migrations run in the background; unsupported newer versions block writes and show an actionable error instead of destroying data.
+- Storage quota failures are reported; notes are length-limited.
+
+## GitHub integration
+
+| Concern | Decision |
+| --- | --- |
+| Endpoints | `GET /repos/{owner}/{repo}/issues/{number}`, `GET /repos/{owner}/{repo}/pulls/{number}` |
+| Authentication | None. Anonymous public API requests only |
+| Headers | `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28` |
+| Data stored | Only the fields needed by the models; never raw responses |
+| Timeout | 10 seconds via `AbortSignal` |
+| Rate limit | Detect 403 with `x-ratelimit-remaining: 0` and 429; surface reset time; no auto-retry |
+| Private/deleted targets | 404 is shown as "not found or private"; a reference can still be saved without metadata |
+| Malformed payload | Reject with a typed `invalid_response` error; retain previous state and sync error |
+| Network scope | Only `https://api.github.com/*`; no GitHub page access |
+
+API calls happen only on explicit save, track, or refresh actions. No `alarms` permission and no background polling.
+
+## Permissions
+
+| Permission | Type | Why it is required | Why no broader alternative |
+| --- | --- | --- | --- |
+| `storage` | API permission | Persist saved issues, tracked PRs, notes, and schema metadata | Required for any persistence |
+| `activeTab` | API permission | Read the active tab URL after the user invokes the extension | Avoids the broader `tabs` permission and persistent access to all tabs |
+| `https://api.github.com/*` | Host permission | Fetch public issue and PR metadata from the background worker | Avoids any `github.com` host access, content scripts, or `scripting` |
+
+Not requested: `tabs`, `scripting`, `alarms`, `identity`, `cookies`, `unlimitedStorage`, `<all_urls>`, or access to `https://github.com/*`.
+
+The final manifest is audited in milestone M1, and permission behavior is verified in Chrome in M4. If `activeTab` does not expose the URL in the popup, the fallback is an explicit URL input, not a broader permission; this would be raised for approval.
+
+## Security and privacy
+
+- No credentials or secrets are stored or requested. No authentication flow exists.
+- Notes and saved references never leave the device. The only outbound requests are anonymous GitHub API reads for the requested public resource.
+- No telemetry, analytics, remote configuration, remotely hosted code, or third-party scripts.
+- Manifest V3 CSP is kept at the default; no `eval` or dynamic code execution.
+- React escapes rendered text; no `dangerouslySetInnerHTML`.
+- All stored records are validated on read; API payloads are treated as untrusted and mapped through narrow type guards.
+- Stored error messages are generated by the extension and bounded; raw server bodies are not persisted.
+- GitHub URLs are parsed and canonicalized; only `https://github.com` owner/repo issue/PR URLs are accepted.
+
+## UI and design direction
+
+- Monochrome design tokens: white background, near-black text, neutral grays for surfaces, borders, and muted text. No gradients or decorative imagery.
+- System font stack; monospace only for repository references and numbers. Compact type scale and a 4/8/12/16/24 spacing scale.
+- Popup: fixed width around 380px, max height around 600px, usable without horizontal scrolling.
+- Dashboard: full tab, max width around 960px, responsive stacking on narrow viewports.
+- Small border radii and subtle 1px borders; minimal elevation.
+- Status labels use text plus shape, never color alone. "Open", "Draft", "Closed", and "Merged" remain distinguishable in grayscale.
+- Visible focus styles, semantic landmarks, labels, keyboard-operable controls, and announced async results. No unnecessary motion.
+- Every surface defines loading, empty, and error states. Per-item refresh and save failures are visible, not swallowed.
+
+## Testing strategy
+
+| Level | Tool | Coverage |
+| --- | --- | --- |
+| Unit | Vitest (Node) | URL parsing and canonicalization, validators, key rules, status derivation, migrations, repository with an in-memory adapter, GitHub mapping/error handling with fake `fetch`, message payload validation, sorting |
+| Component | Vitest + Testing Library (jsdom) | Popup target/save states, note editor, list empty/loading/error states, status badges |
+| End-to-end | Playwright with a persistent Chromium context | Extension loads, popup save/track flow, dashboard note persistence, refresh failure messaging, removal, reload persistence |
+| Manual Chrome checks | Chrome | Permission prompts/manifest, `activeTab` behavior, CSP, network panel shows only `api.github.com`, persistence after browser restart |
+
+Playwright tests must not depend on the live GitHub API. A short feasibility spike in M0 confirms whether extension service-worker requests can be intercepted reliably. If not, the fallback is to keep the GitHub client covered by injected-fetch unit tests and drive E2E through deterministic storage/state setup.
+
+## Technical risks
+
+| Risk | Impact | Mitigation | How to verify |
+| --- | --- | --- | --- |
+| Anonymous API limit (60 requests/hour/IP) and private repos | Refresh/save metadata fails | Fetch only on explicit actions; cache; allow saving without metadata; show reset time; no retries or polling | Fake-fetch unit tests for 403/429; E2E mocked rate-limit state; manual check of message and reset display |
+| Playwright cannot intercept MV3 service-worker fetches | E2E network mocking is flaky or impossible | M0 spike; fallback to fake-fetch unit tests plus deterministic seeded E2E; never call live API in CI | Spike result recorded before M1; E2E runs offline and deterministically |
+| `activeTab` URL availability or lifecycle | Popup cannot identify the current issue/PR | Verify in real Chrome early; show actionable error; consider explicit URL input as an approved fallback | M0/M4 manual test on GitHub tabs and non-GitHub tabs |
+| Service worker termination and concurrent writers | Lost updates or inconsistent records | Stateless handlers, re-read before mutate, background serialized queue, per-entity keys | Unit tests for concurrent commands; manual/idle reload test; E2E parallel save |
+| Corrupt or incompatible stored data | Dashboard crash or data loss | Validate each record, skip without deleting, surface warnings, version metadata, block unsupported newer versions | Fixture tests with malformed records and unknown schema version |
+| Storage quota exceeded | Saves/notes fail | Bounded note length, small records, catch quota errors, clear UI error | Fake adapter tests for quota rejection; manual large-note check |
+| URL edge cases (PR tabs, trailing paths, query strings, case, fake hosts) | Wrong target saved or duplicate records | Pure parser with a broad table-driven test suite; canonical ids and URLs | Unit tests plus active-tab tests |
+| Tailwind/WXT/Vite version incompatibility | Build failures or missing styles | Pin stable compatible versions at M1, commit lockfile, follow official integration docs | `pnpm build`, load unpacked, visual smoke test |
+| Monochrome accessibility | Status/actions indistinguishable or low contrast | Text-plus-shape badges, contrast checks, focus states, keyboard tests | Manual contrast/focus audit and keyboard E2E |
+| GitHub response shape drift | Mapping fails or shows wrong state | Narrow DTO guards, typed errors, preserve last known state, surface sync error | Fixture tests including malformed payloads |
+
+## Decisions pending approval
+
+1. Use the anonymous public GitHub REST API for metadata (recommended) versus URL-only references with no API access.
+2. Ship both a compact popup and a full-page dashboard (recommended) versus popup only.
+3. One note per saved issue, stored separately from the issue (recommended).
+4. PR tracking covers state only (open/draft/closed/merged) with manual refresh, not CI/review status or polling (recommended).
+5. Hand-written validators instead of a schema library, to keep runtime dependencies minimal (recommended for this fixed, small model set).
+
+Implementation starts only after approval, beginning with milestone M0 in `docs/implementation-plan.md`.
