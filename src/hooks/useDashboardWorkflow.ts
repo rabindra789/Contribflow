@@ -25,6 +25,7 @@ export type DashboardViewState =
 export type DashboardActionKind =
   | 'remove-issue'
   | 'untrack-pull-request'
+  | 'refresh-issue'
   | 'refresh-pull-request'
   | 'save-note'
   | 'delete-note';
@@ -43,6 +44,7 @@ export interface DashboardWorkflow {
   refreshCollection(): Promise<void>;
   removeIssue(issueId: string): Promise<boolean>;
   untrackPullRequest(pullRequestId: string): Promise<boolean>;
+  refreshIssue(issueId: string): Promise<boolean>;
   refreshPullRequest(pullRequestId: string): Promise<boolean>;
   saveNote(
     issueId: string,
@@ -71,6 +73,18 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return 'Something went wrong. Try again.';
+}
+
+function upsertIssue(
+  snapshot: StorageSnapshot,
+  issue: StorageSnapshot['issues'][number],
+): StorageSnapshot {
+  return {
+    ...snapshot,
+    issues: snapshot.issues.map((candidate) =>
+      candidate.id === issue.id ? issue : candidate,
+    ),
+  };
 }
 
 function removeIssueFromSnapshot(
@@ -317,6 +331,49 @@ export function useDashboardWorkflow(
     );
   }
 
+  function refreshIssue(issueId: string): Promise<boolean> {
+    if (state.status !== 'ready') {
+      return Promise.resolve(false);
+    }
+    const issue = state.snapshot.issues.find(
+      (candidate) => candidate.id === issueId,
+    );
+    if (issue === undefined) {
+      return Promise.resolve(false);
+    }
+
+    return runAction(
+      { kind: 'refresh-issue', id: issueId },
+      async (snapshot) => {
+        async function reloadLatestSnapshot(): Promise<void> {
+          try {
+            const latest = await client.getSnapshot();
+            if (mountedRef.current) {
+              setState({ status: 'ready', snapshot: latest });
+            }
+          } catch {
+            return;
+          }
+        }
+
+        try {
+          const result = await client.refreshIssue(issue.url);
+          return {
+            snapshot: upsertIssue(snapshot, result.issue),
+            message: 'The issue was refreshed from GitHub.',
+          };
+        } catch (error) {
+          await reloadLatestSnapshot();
+          throw error;
+        }
+      },
+      {
+        formatError: (error) =>
+          `Refresh failed: ${errorMessage(error)} The last known state is still shown.`,
+      },
+    );
+  }
+
   function refreshPullRequest(pullRequestId: string): Promise<boolean> {
     if (state.status !== 'ready') {
       return Promise.resolve(false);
@@ -420,6 +477,7 @@ export function useDashboardWorkflow(
     refreshCollection,
     removeIssue,
     untrackPullRequest,
+    refreshIssue,
     refreshPullRequest,
     saveNote,
     deleteNote,

@@ -901,6 +901,247 @@ describe('dashboard', () => {
     expect(screen.getByText('Last known: Merged')).toBeVisible();
   });
 
+  it('refreshes an issue and shows the updated state', async () => {
+    const refreshedIssue: SavedIssue = {
+      ...issue,
+      title: 'Refreshed issue title',
+      state: 'closed',
+      lastSyncedAt: '2026-10-20T12:10:00.000Z',
+      lastSyncError: null,
+    };
+    const refreshIssue = vi
+      .fn<BackgroundClient['refreshIssue']>()
+      .mockResolvedValue({ issue: refreshedIssue });
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          refreshIssue,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Refresh Microsoft/TypeScript#12345 from GitHub',
+      }),
+    );
+
+    expect(
+      await screen.findByText('The issue was refreshed from GitHub.'),
+    ).toBeVisible();
+    expect(refreshIssue).toHaveBeenCalledWith(issue.url);
+    expect(screen.getByText('Last known: Closed')).toBeVisible();
+    expect(screen.getByText('2026-10-20 12:10 UTC')).toBeVisible();
+  });
+
+  it('keeps the last known issue state and surfaces refresh errors', async () => {
+    const syncError =
+      'GitHub rate limit reached. Try again in 60 seconds.';
+    const failedSnapshot: StorageSnapshot = {
+      ...populatedSnapshot,
+      issues: [{ ...issue, lastSyncError: syncError }],
+    };
+    const getSnapshot = vi
+      .fn<BackgroundClient['getSnapshot']>()
+      .mockResolvedValueOnce(populatedSnapshot)
+      .mockResolvedValueOnce(failedSnapshot);
+    const refreshIssue = vi
+      .fn<BackgroundClient['refreshIssue']>()
+      .mockRejectedValue(
+        new BackgroundClientError('command-failed', syncError, {
+          code: 'rate-limited',
+          message: syncError,
+          status: 429,
+          retryAfterSeconds: 60,
+        }),
+      );
+    render(
+      <DashboardApp
+        client={createClient({ getSnapshot, refreshIssue })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Refresh Microsoft/TypeScript#12345 from GitHub',
+      }),
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(`Refresh failed: ${syncError}`);
+    expect(alert).toHaveTextContent('The last known state is still shown.');
+    expect(screen.getByText('Last known: Open')).toBeVisible();
+    expect(screen.queryByText('Last known: Closed')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Last sync failed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(syncError).length).toBeGreaterThan(0);
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears a pre-existing lastSyncError on successful refresh', async () => {
+    const issueWithError: SavedIssue = {
+      ...issue,
+      lastSyncError: 'Previous sync failed.',
+    };
+    const snapshotWithError: StorageSnapshot = {
+      ...populatedSnapshot,
+      issues: [issueWithError, unsyncedIssue],
+    };
+    const refreshedIssue: SavedIssue = {
+      ...issueWithError,
+      title: 'Refreshed issue title',
+      state: 'closed',
+      lastSyncedAt: '2026-10-20T12:10:00.000Z',
+      lastSyncError: null,
+    };
+    const getSnapshot = vi
+      .fn<BackgroundClient['getSnapshot']>()
+      .mockResolvedValueOnce(snapshotWithError)
+      .mockResolvedValueOnce({
+        ...snapshotWithError,
+        issues: [{ ...refreshedIssue }, unsyncedIssue],
+      });
+    const refreshIssue = vi
+      .fn<BackgroundClient['refreshIssue']>()
+      .mockResolvedValue({ issue: refreshedIssue });
+    render(
+      <DashboardApp
+        client={createClient({ getSnapshot, refreshIssue })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    // Ensure the pre-existing error is present initially
+    expect(screen.getByText('Previous sync failed.')).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Refresh Microsoft/TypeScript#12345 from GitHub',
+      }),
+    );
+
+    expect(
+      await screen.findByText('The issue was refreshed from GitHub.'),
+    ).toBeVisible();
+    expect(screen.queryByText('Previous sync failed.')).not.toBeInTheDocument();
+    // The unsynced issue still has its error, so one 'Last sync failed' remains
+    expect(screen.getAllByText('Last sync failed').length).toBe(1);
+    expect(screen.getByText('Last known: Closed')).toBeVisible();
+    expect(screen.getByText('2026-10-20 12:10 UTC')).toBeVisible();
+  });
+
+  it('prevents duplicate issue refreshes while the request is pending', async () => {
+    const pendingRefresh = deferred<
+      Awaited<ReturnType<BackgroundClient['refreshIssue']>>
+    >();
+    const refreshIssue = vi
+      .fn<BackgroundClient['refreshIssue']>()
+      .mockReturnValue(pendingRefresh.promise);
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          refreshIssue,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    const refreshButton = screen.getByRole('button', {
+      name: 'Refresh Microsoft/TypeScript#12345 from GitHub',
+    });
+    fireEvent.click(refreshButton);
+    fireEvent.click(refreshButton);
+
+    expect(refreshIssue).toHaveBeenCalledTimes(1);
+    expect(refreshButton).toBeDisabled();
+    expect(refreshButton).toHaveTextContent('Refreshing...');
+
+    await act(async () => {
+      pendingRefresh.resolve({
+        issue: {
+          ...issue,
+          title: 'Refreshed issue title',
+          state: 'closed',
+          lastSyncedAt: '2026-10-20T12:10:00.000Z',
+        },
+      });
+      await pendingRefresh.promise;
+    });
+
+    expect(
+      await screen.findByText('The issue was refreshed from GitHub.'),
+    ).toBeVisible();
+    expect(refreshIssue).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Last known: Closed')).toBeVisible();
+  });
+
+  it('shows per-issue pending state during refresh', async () => {
+    const pendingRefresh = deferred<
+      Awaited<ReturnType<BackgroundClient['refreshIssue']>>
+    >();
+    const refreshIssue = vi
+      .fn<BackgroundClient['refreshIssue']>()
+      .mockReturnValue(pendingRefresh.promise);
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          refreshIssue,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    // The second issue (unsynced) also has a refresh button
+    const secondRefreshButton = screen.getByRole('button', {
+      name: 'Refresh octocat/Hello-World#42 from GitHub',
+    });
+
+    const firstRefreshButton = screen.getByRole('button', {
+      name: 'Refresh Microsoft/TypeScript#12345 from GitHub',
+    });
+    fireEvent.click(firstRefreshButton);
+
+    expect(firstRefreshButton).toHaveTextContent('Refreshing...');
+    expect(secondRefreshButton).not.toHaveTextContent('Refreshing...');
+    expect(secondRefreshButton).toHaveTextContent('Refresh');
+
+    await act(async () => {
+      pendingRefresh.resolve({
+        issue: {
+          ...issue,
+          title: 'Refreshed issue title',
+          state: 'closed',
+          lastSyncedAt: '2026-10-20T12:10:00.000Z',
+        },
+      });
+      await pendingRefresh.promise;
+    });
+
+    expect(
+      await screen.findByText('The issue was refreshed from GitHub.'),
+    ).toBeVisible();
+  });
+
   it('adds a private note and displays it with the issue', async () => {
     const createdNote: IssueNote = {
       ...note,

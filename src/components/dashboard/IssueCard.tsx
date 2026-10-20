@@ -13,8 +13,10 @@ interface IssueCardProps {
   note: IssueNote | undefined;
   actionsDisabled: boolean;
   removalPending: boolean;
+  refreshPending: boolean;
   notePending: boolean;
   onRemove(): Promise<boolean>;
+  onRefresh(): Promise<boolean>;
   onSaveNote(
     body: string,
     expectedUpdatedAt: IsoTimestamp | null,
@@ -27,8 +29,10 @@ export function IssueCard({
   note,
   actionsDisabled,
   removalPending,
+  refreshPending,
   notePending,
   onRemove,
+  onRefresh,
   onSaveNote,
   onDeleteNote,
 }: IssueCardProps) {
@@ -118,17 +122,30 @@ export function IssueCard({
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            className={quietButtonClass}
-            disabled={actionsDisabled}
-            aria-label={`Remove ${reference} and its note`}
-            onClick={() => {
-              setConfirming(true);
-            }}
-          >
-            Remove issue
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              className={secondaryButtonClass}
+              disabled={actionsDisabled}
+              aria-label={`Refresh ${reference} from GitHub`}
+              onClick={() => {
+                void onRefresh();
+              }}
+            >
+              {refreshPending ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button
+              type="button"
+              className={quietButtonClass}
+              disabled={actionsDisabled}
+              aria-label={`Remove ${reference} and its note`}
+              onClick={() => {
+                setConfirming(true);
+              }}
+            >
+              Remove issue
+            </button>
+          </div>
         )}
       </div>
     </article>
