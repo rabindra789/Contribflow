@@ -1,20 +1,36 @@
 import { useId, useState } from 'react';
-import type { SavedIssue } from '../../domain/models';
-import { primaryButtonClass, quietButtonClass, secondaryButtonClass } from './button-classes';
+import type { IsoTimestamp, IssueNote, SavedIssue } from '../../domain/models';
+import {
+  primaryButtonClass,
+  quietButtonClass,
+  secondaryButtonClass,
+} from './button-classes';
+import { IssueNote as IssueNoteEditor } from './IssueNote';
 import { StateBadge, SyncDetails } from './RecordBadges';
 
 interface IssueCardProps {
   issue: SavedIssue;
+  note: IssueNote | undefined;
   actionsDisabled: boolean;
-  pending: boolean;
+  removalPending: boolean;
+  notePending: boolean;
   onRemove(): Promise<boolean>;
+  onSaveNote(
+    body: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ): Promise<boolean>;
+  onDeleteNote(expectedUpdatedAt: IsoTimestamp | null): Promise<boolean>;
 }
 
 export function IssueCard({
   issue,
+  note,
   actionsDisabled,
-  pending,
+  removalPending,
+  notePending,
   onRemove,
+  onSaveNote,
+  onDeleteNote,
 }: IssueCardProps) {
   const headingId = useId();
   const [confirming, setConfirming] = useState(false);
@@ -49,6 +65,15 @@ export function IssueCard({
         lastSyncError={issue.lastSyncError}
       />
 
+      <IssueNoteEditor
+        issue={issue}
+        note={note}
+        actionsDisabled={actionsDisabled}
+        pending={notePending}
+        onSave={onSaveNote}
+        onDelete={onDeleteNote}
+      />
+
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
         <a
           href={issue.url}
@@ -81,13 +106,15 @@ export function IssueCard({
               className={primaryButtonClass}
               disabled={actionsDisabled}
               aria-label={
-                pending ? 'Removing issue...' : `Confirm removing ${reference}`
+                removalPending
+                  ? 'Removing issue...'
+                  : `Confirm removing ${reference}`
               }
               onClick={() => {
                 void confirmRemove();
               }}
             >
-              {pending ? 'Removing...' : 'Remove permanently'}
+              {removalPending ? 'Removing...' : 'Remove permanently'}
             </button>
           </div>
         ) : (

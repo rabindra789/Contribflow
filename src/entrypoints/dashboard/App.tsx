@@ -4,6 +4,7 @@ import { secondaryButtonClass } from '@/components/dashboard/button-classes';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { IssueCard } from '@/components/dashboard/IssueCard';
 import { PullRequestCard } from '@/components/dashboard/PullRequestCard';
+import type { IsoTimestamp } from '../../domain/models';
 import type { StorageSnapshot } from '../../storage/repository';
 import type { StorageWarning } from '../../storage/warnings';
 import {
@@ -110,6 +111,8 @@ function DashboardReady({
   onRefresh,
   onRemoveIssue,
   onUntrackPullRequest,
+  onSaveNote,
+  onDeleteNote,
 }: {
   snapshot: StorageSnapshot;
   pending: DashboardPendingAction | null;
@@ -118,6 +121,15 @@ function DashboardReady({
   onRefresh: () => void;
   onRemoveIssue: (issueId: string) => Promise<boolean>;
   onUntrackPullRequest: (pullRequestId: string) => Promise<boolean>;
+  onSaveNote: (
+    issueId: string,
+    body: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ) => Promise<boolean>;
+  onDeleteNote: (
+    issueId: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ) => Promise<boolean>;
 }) {
   const actionsDisabled = pending !== null || refreshing;
   const [filters, setFilters] = useState<DashboardFiltersValue>(
@@ -252,12 +264,24 @@ function DashboardReady({
                     <IssueCard
                       key={issue.id}
                       issue={issue}
+                      note={snapshot.notes[issue.id]}
                       actionsDisabled={actionsDisabled}
-                      pending={
+                      removalPending={
                         pending?.kind === 'remove-issue' &&
                         pending.id === issue.id
                       }
+                      notePending={
+                        (pending?.kind === 'save-note' ||
+                          pending?.kind === 'delete-note') &&
+                        pending.id === issue.id
+                      }
                       onRemove={() => onRemoveIssue(issue.id)}
+                      onSaveNote={(body, expectedUpdatedAt) =>
+                        onSaveNote(issue.id, body, expectedUpdatedAt)
+                      }
+                      onDeleteNote={(expectedUpdatedAt) =>
+                        onDeleteNote(issue.id, expectedUpdatedAt)
+                      }
                     />
                   ))}
                 </div>
@@ -362,6 +386,8 @@ export function DashboardApp({ client }: DashboardAppProps) {
           }}
           onRemoveIssue={workflow.removeIssue}
           onUntrackPullRequest={workflow.untrackPullRequest}
+          onSaveNote={workflow.saveNote}
+          onDeleteNote={workflow.deleteNote}
         />
       ) : null}
     </AppShell>

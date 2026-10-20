@@ -207,6 +207,12 @@ describe('dashboard', () => {
     expect(screen.getByText('Last known: Unknown')).toBeVisible();
     expect(screen.getByText('Last known: Draft')).toBeVisible();
     expect(screen.getByText('Title unavailable')).toBeVisible();
+    expect(screen.getByText(note.body)).toBeVisible();
+    expect(
+      screen.getByRole('button', {
+        name: 'Edit note for Microsoft/TypeScript#12345',
+      }),
+    ).toBeVisible();
 
     expect(
       screen.getByRole('group', { name: 'Saved issues: 2' }),
@@ -601,6 +607,236 @@ describe('dashboard', () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole('group', { name: 'Tracked pull requests: 0' }),
+    ).toBeVisible();
+  });
+
+  it('adds a private note and displays it with the issue', async () => {
+    const createdNote: IssueNote = {
+      ...note,
+      body: 'New private note',
+      createdAt: '2026-10-20T12:00:00.000Z',
+      updatedAt: '2026-10-20T12:00:00.000Z',
+    };
+    const saveNote = vi
+      .fn<BackgroundClient['saveNote']>()
+      .mockResolvedValue({ note: createdNote });
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue({ ...emptySnapshot, issues: [issue] }),
+          saveNote,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add note for Microsoft/TypeScript#12345',
+      }),
+    );
+
+    const noteField = screen.getByLabelText('Note');
+    const saveButton = screen.getByRole('button', { name: 'Save note' });
+    expect(noteField).toHaveValue('');
+    expect(saveButton).toBeDisabled();
+
+    fireEvent.change(noteField, { target: { value: '   ' } });
+    expect(saveButton).toBeDisabled();
+
+    fireEvent.change(noteField, { target: { value: createdNote.body } });
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+
+    expect(
+      await screen.findByText('The private note was added.'),
+    ).toBeVisible();
+    expect(saveNote).toHaveBeenCalledWith(issue.id, createdNote.body, null);
+    expect(screen.getByText(createdNote.body)).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Private notes: 1' })).toBeVisible();
+    expect(
+      screen.getByRole('button', {
+        name: 'Edit note for Microsoft/TypeScript#12345',
+      }),
+    ).toBeVisible();
+  });
+
+  it('edits an existing note using its revision token', async () => {
+    const updatedNote: IssueNote = {
+      ...note,
+      body: 'Updated private note',
+      updatedAt: '2026-10-20T12:05:00.000Z',
+    };
+    const saveNote = vi
+      .fn<BackgroundClient['saveNote']>()
+      .mockResolvedValue({ note: updatedNote });
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          saveNote,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText(note.body)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Edit note for Microsoft/TypeScript#12345',
+      }),
+    );
+    const noteField = screen.getByLabelText('Note');
+    expect(noteField).toHaveValue(note.body);
+
+    fireEvent.change(noteField, { target: { value: updatedNote.body } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+
+    expect(
+      await screen.findByText('The private note was saved.'),
+    ).toBeVisible();
+    expect(saveNote).toHaveBeenCalledWith(
+      issue.id,
+      updatedNote.body,
+      note.updatedAt,
+    );
+    expect(screen.getByText(updatedNote.body)).toBeVisible();
+  });
+
+  it('keeps an unsaved note draft when the write conflicts', async () => {
+    const conflictMessage =
+      'This note changed in another view. Refresh the collection before trying again.';
+    const saveNote = vi
+      .fn<BackgroundClient['saveNote']>()
+      .mockRejectedValue(
+        new BackgroundClientError('command-failed', conflictMessage, {
+          code: 'note-conflict',
+          message: conflictMessage,
+        }),
+      );
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          saveNote,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText(note.body)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Edit note for Microsoft/TypeScript#12345',
+      }),
+    );
+    const noteField = screen.getByLabelText('Note');
+    fireEvent.change(noteField, { target: { value: 'My unsaved draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(conflictMessage);
+    expect(screen.getByLabelText('Note')).toHaveValue('My unsaved draft');
+    expect(screen.getByRole('button', { name: 'Save note' })).toBeEnabled();
+    expect(screen.getByRole('group', { name: 'Private notes: 1' })).toBeVisible();
+  });
+
+  it('prevents duplicate note submissions while saving', async () => {
+    const pendingSave = deferred<
+      Awaited<ReturnType<BackgroundClient['saveNote']>>
+    >();
+    const saveNote = vi
+      .fn<BackgroundClient['saveNote']>()
+      .mockReturnValue(pendingSave.promise);
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue({ ...emptySnapshot, issues: [issue] }),
+          saveNote,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add note for Microsoft/TypeScript#12345',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Note'), {
+      target: { value: 'Pending note' },
+    });
+    const saveButton = screen.getByRole('button', { name: 'Save note' });
+    fireEvent.click(saveButton);
+    fireEvent.click(saveButton);
+
+    expect(saveNote).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
+
+    await act(async () => {
+      pendingSave.resolve({ note: { ...note, body: 'Pending note' } });
+      await pendingSave.promise;
+    });
+
+    expect(
+      await screen.findByText('The private note was added.'),
+    ).toBeVisible();
+    expect(saveNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletes a note after confirmation', async () => {
+    const deleteNote = vi
+      .fn<BackgroundClient['deleteNote']>()
+      .mockResolvedValue({ issueId: issue.id });
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          deleteNote,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText(note.body)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Edit note for Microsoft/TypeScript#12345',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Delete note for Microsoft/TypeScript#12345',
+      }),
+    );
+    expect(screen.getByText('Delete this private note?')).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Confirm deleting note for Microsoft/TypeScript#12345',
+      }),
+    );
+
+    expect(
+      await screen.findByText('The private note was deleted.'),
+    ).toBeVisible();
+    expect(deleteNote).toHaveBeenCalledWith(issue.id, note.updatedAt);
+    expect(screen.queryByText(note.body)).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Private notes: 0' })).toBeVisible();
+    expect(
+      screen.getByRole('button', {
+        name: 'Add note for Microsoft/TypeScript#12345',
+      }),
     ).toBeVisible();
   });
 

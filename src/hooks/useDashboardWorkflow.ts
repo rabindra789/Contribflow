@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { IsoTimestamp } from '../domain/models';
 import {
   BackgroundClientError,
   createBackgroundClient,
@@ -18,7 +19,11 @@ export type DashboardViewState =
   | { status: 'error'; message: string }
   | { status: 'ready'; snapshot: StorageSnapshot };
 
-export type DashboardActionKind = 'remove-issue' | 'untrack-pull-request';
+export type DashboardActionKind =
+  | 'remove-issue'
+  | 'untrack-pull-request'
+  | 'save-note'
+  | 'delete-note';
 
 export interface DashboardPendingAction {
   kind: DashboardActionKind;
@@ -34,6 +39,15 @@ export interface DashboardWorkflow {
   refreshCollection(): Promise<void>;
   removeIssue(issueId: string): Promise<boolean>;
   untrackPullRequest(pullRequestId: string): Promise<boolean>;
+  saveNote(
+    issueId: string,
+    body: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ): Promise<boolean>;
+  deleteNote(
+    issueId: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ): Promise<boolean>;
 }
 
 export interface DashboardWorkflowOptions {
@@ -224,6 +238,57 @@ export function useDashboardWorkflow(
     );
   }
 
+  function saveNote(
+    issueId: string,
+    body: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ): Promise<boolean> {
+    if (
+      state.status !== 'ready' ||
+      !state.snapshot.issues.some((issue) => issue.id === issueId)
+    ) {
+      return Promise.resolve(false);
+    }
+    const isNew = state.snapshot.notes[issueId] === undefined;
+
+    return runAction({ kind: 'save-note', id: issueId }, async (snapshot) => {
+      const result = await client.saveNote(
+        issueId,
+        body,
+        expectedUpdatedAt,
+      );
+      return {
+        snapshot: {
+          ...snapshot,
+          notes: { ...snapshot.notes, [issueId]: result.note },
+        },
+        message: isNew ? 'The private note was added.' : 'The private note was saved.',
+      };
+    });
+  }
+
+  function deleteNote(
+    issueId: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ): Promise<boolean> {
+    if (
+      state.status !== 'ready' ||
+      !state.snapshot.issues.some((issue) => issue.id === issueId)
+    ) {
+      return Promise.resolve(false);
+    }
+
+    return runAction({ kind: 'delete-note', id: issueId }, async (snapshot) => {
+      await client.deleteNote(issueId, expectedUpdatedAt);
+      const notes = { ...snapshot.notes };
+      delete notes[issueId];
+      return {
+        snapshot: { ...snapshot, notes },
+        message: 'The private note was deleted.',
+      };
+    });
+  }
+
   return {
     state,
     pending,
@@ -233,5 +298,7 @@ export function useDashboardWorkflow(
     refreshCollection,
     removeIssue,
     untrackPullRequest,
+    saveNote,
+    deleteNote,
   };
 }
