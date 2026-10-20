@@ -2,6 +2,7 @@ import { browser, type Browser } from 'wxt/browser';
 import {
   createStorageRepository,
   type StoragePort,
+  type StorageReader,
   type StorageRepository,
 } from './repository';
 
@@ -42,4 +43,12 @@ export function createChromeStoragePort(): StoragePort {
 
 export function createChromeStorageRepository(): StorageRepository {
   return createStorageRepository(createChromeStoragePort());
+}
+
+export function createChromeStorageReader(): StorageReader {
+  const repository = createStorageRepository(createChromeStoragePort());
+  return {
+    loadSnapshot: () => repository.loadSnapshot(),
+    subscribe: (listener) => repository.subscribe(listener),
+  };
 }

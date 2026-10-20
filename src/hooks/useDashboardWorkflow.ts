@@ -5,7 +5,10 @@ import {
   createBackgroundClient,
   type BackgroundClient,
 } from '../messaging/background-client';
-import type { StorageSnapshot } from '../storage/repository';
+import type {
+  StorageChangeSummary,
+  StorageSnapshot,
+} from '../storage/repository';
 
 export type DashboardNoticeTone = 'success' | 'error';
 
@@ -52,8 +55,13 @@ export interface DashboardWorkflow {
   ): Promise<boolean>;
 }
 
+export type DashboardStorageSubscription = (
+  listener: (change: StorageChangeSummary) => void,
+) => () => void;
+
 export interface DashboardWorkflowOptions {
   client?: BackgroundClient;
+  subscribeToChanges?: DashboardStorageSubscription;
 }
 
 const defaultClient = createBackgroundClient();
@@ -106,6 +114,7 @@ export function useDashboardWorkflow(
   options: DashboardWorkflowOptions = {},
 ): DashboardWorkflow {
   const client = options.client ?? defaultClient;
+  const subscribeToChanges = options.subscribeToChanges;
 
   const [state, setState] = useState<DashboardViewState>({ status: 'loading' });
   const [pending, setPending] = useState<DashboardPendingAction | null>(null);
@@ -142,6 +151,56 @@ export function useDashboardWorkflow(
       requestIdRef.current += 1;
     };
   }, [client, reloadToken]);
+
+  useEffect(() => {
+    if (state.status !== 'ready' || subscribeToChanges === undefined) {
+      return;
+    }
+
+    let active = true;
+    let inFlight = false;
+    let queued = false;
+
+    async function loadLatest(): Promise<void> {
+      if (inFlight) {
+        queued = true;
+        return;
+      }
+
+      inFlight = true;
+      try {
+        do {
+          queued = false;
+          const snapshot = await client.getSnapshot();
+          if (!active) {
+            return;
+          }
+          setState({ status: 'ready', snapshot });
+        } while (queued && active);
+      } catch (error) {
+        if (active) {
+          setNotice({
+            tone: 'error',
+            message: `Saved data could not be updated: ${errorMessage(error)}`,
+          });
+        }
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    const unsubscribe = subscribeToChanges((change) => {
+      if (!change.changedKeys.some((key) => key.startsWith('contribflow.'))) {
+        return;
+      }
+      void loadLatest();
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [client, state.status, subscribeToChanges]);
 
   function reload(): void {
     if (busyRef.current) {

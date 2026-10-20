@@ -5,12 +5,17 @@ import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { IssueCard } from '@/components/dashboard/IssueCard';
 import { PullRequestCard } from '@/components/dashboard/PullRequestCard';
 import type { IsoTimestamp } from '../../domain/models';
-import type { StorageSnapshot } from '../../storage/repository';
+import type {
+  StorageChangeSummary,
+  StorageSnapshot,
+} from '../../storage/repository';
+import { createChromeStorageReader } from '../../storage/chrome-storage';
 import type { StorageWarning } from '../../storage/warnings';
 import {
   useDashboardWorkflow,
   type DashboardNotice,
   type DashboardPendingAction,
+  type DashboardStorageSubscription,
 } from '../../hooks/useDashboardWorkflow';
 import {
   DEFAULT_DASHBOARD_FILTERS,
@@ -346,10 +351,16 @@ function DashboardReady({
 
 export interface DashboardAppProps {
   client?: BackgroundClient;
+  subscribeToChanges?: DashboardStorageSubscription;
 }
 
-export function DashboardApp({ client }: DashboardAppProps) {
-  const workflow = useDashboardWorkflow(client ? { client } : {});
+export function DashboardApp({
+  client,
+  subscribeToChanges,
+}: DashboardAppProps) {
+  const workflow = useDashboardWorkflow(
+    client ? { client, subscribeToChanges } : { subscribeToChanges },
+  );
 
   return (
     <AppShell
@@ -403,5 +414,11 @@ export function DashboardApp({ client }: DashboardAppProps) {
 }
 
 export default function App() {
-  return <DashboardApp />;
+  const subscribeToChanges: DashboardStorageSubscription = useMemo(() => {
+    const reader = createChromeStorageReader();
+    return (listener: (change: StorageChangeSummary) => void) =>
+      reader.subscribe(listener);
+  }, []);
+
+  return <DashboardApp subscribeToChanges={subscribeToChanges} />;
 }

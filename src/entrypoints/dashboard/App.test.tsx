@@ -15,7 +15,10 @@ import {
   BackgroundClientError,
   type BackgroundClient,
 } from '../../messaging/background-client';
-import type { StorageSnapshot } from '../../storage/repository';
+import type {
+  StorageChangeSummary,
+  StorageSnapshot,
+} from '../../storage/repository';
 import { DashboardApp } from './App';
 
 const issueTitle = 'Improve inference for generic callbacks';
@@ -44,6 +47,15 @@ const unsyncedIssue: SavedIssue = {
   savedAt: '2026-10-18T14:00:00.000Z',
   lastSyncedAt: null,
   lastSyncError: 'GitHub metadata sync failed.',
+};
+
+const secondIssue: SavedIssue = {
+  ...issue,
+  id: 'microsoft/typescript#9999',
+  number: 9999,
+  url: 'https://github.com/Microsoft/TypeScript/issues/9999',
+  title: 'Second saved issue',
+  savedAt: '2026-10-19T11:00:00.000Z',
 };
 
 const pullRequestTitle = 'Fix callback inference';
@@ -118,6 +130,27 @@ function deferred<T>(): {
   return { promise, resolve };
 }
 
+function createStorageSubscription() {
+  const listeners: Array<(change: StorageChangeSummary) => void> = [];
+
+  return {
+    subscribe: (listener: (change: StorageChangeSummary) => void) => {
+      listeners.push(listener);
+      return () => {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) {
+          listeners.splice(index, 1);
+        }
+      };
+    },
+    emit(changedKeys: string[]): void {
+      for (const listener of [...listeners]) {
+        listener({ changedKeys });
+      }
+    },
+  };
+}
+
 describe('dashboard', () => {
   it('shows loading state until the snapshot arrives', async () => {
     const pending = deferred<StorageSnapshot>();
@@ -173,6 +206,131 @@ describe('dashboard', () => {
       await screen.findByRole('heading', { name: 'Your workspace is empty' }),
     ).toBeVisible();
     expect(getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes the dashboard when ContribFlow storage changes', async () => {
+    const updatedSnapshot: StorageSnapshot = {
+      ...populatedSnapshot,
+      issues: [...populatedSnapshot.issues, secondIssue],
+      warnings: [],
+    };
+    const getSnapshot = vi
+      .fn<BackgroundClient['getSnapshot']>()
+      .mockResolvedValueOnce(populatedSnapshot)
+      .mockResolvedValueOnce(updatedSnapshot);
+    const subscription = createStorageSubscription();
+    render(
+      <DashboardApp
+        client={createClient({ getSnapshot })}
+        subscribeToChanges={subscription.subscribe}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'Second saved issue' }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      subscription.emit(['contribflow.v1.issue.new']);
+    });
+
+    expect(
+      await screen.findByRole('heading', { name: 'Second saved issue' }),
+    ).toBeVisible();
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores storage changes outside ContribFlow', async () => {
+    const updatedSnapshot: StorageSnapshot = {
+      ...populatedSnapshot,
+      issues: [...populatedSnapshot.issues, secondIssue],
+    };
+    const getSnapshot = vi
+      .fn<BackgroundClient['getSnapshot']>()
+      .mockResolvedValueOnce(populatedSnapshot)
+      .mockResolvedValueOnce(updatedSnapshot);
+    const subscription = createStorageSubscription();
+    render(
+      <DashboardApp
+        client={createClient({ getSnapshot })}
+        subscribeToChanges={subscription.subscribe}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+
+    await act(async () => {
+      subscription.emit(['unrelated-key']);
+    });
+    expect(getSnapshot).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole('heading', { name: 'Second saved issue' }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      subscription.emit(['contribflow.v1.issue.new']);
+    });
+    expect(
+      await screen.findByRole('heading', { name: 'Second saved issue' }),
+    ).toBeVisible();
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces a live reload failure without hiding current data', async () => {
+    const getSnapshot = vi
+      .fn<BackgroundClient['getSnapshot']>()
+      .mockResolvedValueOnce(populatedSnapshot)
+      .mockRejectedValueOnce(
+        new BackgroundClientError(
+          'messaging-unavailable',
+          'Could not reach the extension background.',
+        ),
+      );
+    const subscription = createStorageSubscription();
+    render(
+      <DashboardApp
+        client={createClient({ getSnapshot })}
+        subscribeToChanges={subscription.subscribe}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+
+    await act(async () => {
+      subscription.emit(['contribflow.v1.issue.new']);
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Saved data could not be updated: Could not reach the extension background.',
+    );
+    expect(screen.getByRole('heading', { name: issueTitle })).toBeVisible();
+  });
+
+  it('unsubscribes from storage changes on unmount', async () => {
+    const unsubscribe = vi.fn();
+    const subscribeToChanges = vi.fn(() => unsubscribe);
+    const rendered = render(
+      <DashboardApp
+        client={createClient()}
+        subscribeToChanges={subscribeToChanges}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Your workspace is empty' }),
+    ).toBeVisible();
+
+    rendered.unmount();
+
+    expect(subscribeToChanges).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it('renders an empty workspace with zero counts', async () => {
