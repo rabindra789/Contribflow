@@ -253,7 +253,7 @@ Write commands reject with the exported `StorageRepositoryError`, whose `kind` i
 | `quota-exceeded` | Chrome rejected the write because the storage quota was exceeded |
 | `unavailable` | The storage adapter failed for another reason |
 
-The repository is created with `createStorageRepository(port)`. `createMemoryStorageHarness()` / `createMemoryStorageRepository()` provide the in-memory adapter used by tests, and `createChromeStorageRepository()` provides the production adapter. The Chrome adapter is the only module that touches `chrome.storage` or WXT browser APIs.
+The repository is created with `createStorageRepository(port)`. `createMemoryStorageHarness()` / `createMemoryStorageRepository()` provide the in-memory adapter used by tests, and `createChromeStorageRepository()` / `createChromeStorageReader()` provide the production write and read-only subscription adapters. The Chrome adapter is the only module that touches `chrome.storage` or WXT browser APIs.
 
 ## Lifecycle rules
 
@@ -263,7 +263,8 @@ The repository is created with `createStorageRepository(port)`. `createMemorySto
 - Refresh: replaces the metadata fields only; local timestamps (`savedAt` / `addedAt`) and notes are preserved.
 - Remove issue: removes the issue and note keys in one `remove` call, and also removes an orphan note for that id. Missing keys are a no-op.
 - Save note: requires a valid existing issue; upserts the single note, updates `updatedAt`, and preserves the stored `createdAt`.
-- Delete note: independent action; empty note bodies are invalid rather than implicitly deleting.
+- Note commands carry `expectedUpdatedAt`: a `null` token is valid only when no note exists; an existing note requires its exact `updatedAt`, otherwise the command fails with `note-conflict` and writes nothing. A successful note update strictly increases `updatedAt`, even if the previous write occurred in the same millisecond.
+- Delete note: independent action; empty note bodies are invalid rather than implicitly deleting. An existing note requires its exact `updatedAt`; deleting an absent note is an idempotent success.
 - Orphan notes (missing issue) are kept, reported as warnings, and not displayed.
 - Invalid records are kept, reported, and excluded from the UI.
 - The first write to an empty store writes the meta key and the record in one `set` call. Every mutation validates meta before writing, including no-op duplicates.

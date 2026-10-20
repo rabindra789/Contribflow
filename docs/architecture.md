@@ -1,6 +1,6 @@
 # ContribFlow Architecture
 
-Status: M1 foundation, M2 domain/persistence, M3 GitHub client/background commands, and the M4.1 popup target/action workflow are implemented. The dashboard remains a shell; M4.2 (dashboard link/counts) and M5+ are not started.
+Status: M1 foundation, M2 domain/persistence, M3 GitHub client/background commands, M4.1 popup target/action workflow, and M4.2 dashboard workspace are implemented. The dashboard loads and refreshes through the background command pipeline, and it subscribes to local storage changes while open. Release hardening (M6) remains.
 
 ## Goals
 
@@ -18,7 +18,7 @@ All user data stays in `chrome.storage.local`. The extension works with saved da
 
 - Accounts, OAuth, personal access tokens, or private repository metadata.
 - A backend, sync, payments, analytics, telemetry, or AI services.
-- Notifications, background polling, tags, search, or multiple notes per issue.
+- Notifications, background polling, tags, or multiple notes per issue.
 - CI, review, or mergeability status for pull requests.
 - GitHub writes such as commenting, starring, or closing.
 - GitHub Enterprise, Firefox, or non-Chrome browsers.
@@ -138,6 +138,7 @@ Unit tests are colocated as `*.test.ts` / `*.test.tsx`. Playwright tests live in
 4. Save/track and remove/untrack actions send the existing typed commands; success updates the local view immediately, while failures keep the prior state and show a bounded message.
 5. A saved reference whose metadata sync failed shows `lastSyncError` and offers `REFRESH_ISSUE` or `REFRESH_PULL_REQUEST` as an explicit retry. The popup never writes storage or calls GitHub directly.
 6. The background client validates the response envelope, command result, storage records, notes, target ids, and warnings before the hook can render them.
+7. On a supported target, the popup shows an always-available dashboard link and saved counts from the same snapshot. The link opens `/dashboard.html` in a new tab; unsupported and missing-tab states still show the link without reading storage.
 
 ### Save an issue
 
@@ -165,14 +166,15 @@ Same placeholder-first flow using `GET /repos/{owner}/{repo}/pulls/{number}` and
 
 - The dashboard note editor edits the single note for a saved issue.
 - Saving is explicit. Empty notes are rejected; deletion uses a separate action.
+- Note commands require the editor's `expectedUpdatedAt` token. A stale token returns `note-conflict` and does not overwrite a newer note; successful updates strictly increase `updatedAt`.
 - Notes are stored separately from the issue and are never sent to GitHub.
 - Removing an issue removes its note in the same storage operation.
 
 ### Dashboard load
 
-1. The dashboard calls `loadSnapshot` on the repository.
-2. Each record is validated independently. Valid records render; invalid records remain in storage and produce a visible warning; orphan notes produce a warning and are not shown.
-3. The dashboard subscribes to storage changes and re-reads the snapshot after relevant changes (small dataset, no incremental cache required).
+1. The dashboard calls `GET_SNAPSHOT` through the validated background client.
+2. Each record is validated independently in the background response. Valid records render; invalid records remain in storage and produce a visible warning; orphan notes produce a warning and are not shown.
+3. The dashboard subscribes through the read-only `StorageReader` contract and re-reads with `GET_SNAPSHOT` after relevant `contribflow.*` storage changes. Storage events carry changed keys only, never record contents. Changes are coalesced and render errors are surfaced without hiding current data.
 
 ## Persistence summary
 
@@ -247,8 +249,8 @@ The final manifest is audited in milestone M1. The M0 spike verified in Chrome 1
 | Level | Tool | Coverage |
 | --- | --- | --- |
 | Unit | Vitest (Node) | URL parsing and canonicalization, validators, key rules, status derivation, migrations, repository with an in-memory adapter, GitHub client success/error paths with fake `fetch`, rate-limit parsing, message contracts, background command handler with in-memory repository and fake GitHub, sorting |
-| Component | Vitest + Testing Library (jsdom) | Popup target/save states, note editor, list empty/loading/error states, status badges |
-| End-to-end | Playwright with a persistent bundled Chromium (Chrome for Testing) context | Extension loads, background message round trip, mocked save/snapshot/remove flow, popup save/track flow, dashboard note persistence, refresh failure messaging, reload persistence |
+| Component | Vitest + Testing Library (jsdom) | Popup target/save states and dashboard link/counts, dashboard note editor, filters/sort/counts, list empty/loading/error states, storage-change coalescing, status badges |
+| End-to-end | Playwright with a persistent bundled Chromium (Chrome for Testing) context | Extension loads, background message round trip, mocked save/snapshot/remove flow, popup save/track flow, dashboard live updates, note persistence, PR refresh/untrack, issue removal, reload persistence |
 | Manual Chrome checks | Chrome | Permission prompts/manifest, `activeTab` behavior, CSP, network panel shows only `api.github.com`, persistence after browser restart |
 
 Playwright tests must not depend on the live GitHub API. Playwright loads extensions with its bundled Chromium because branded Chrome can no longer install unpacked extensions via command-line flags (removed in Chrome 137); M1 verified that the production build loads in headless bundled Chromium and that `browserContext.route()` intercepts service-worker `api.github.com` fetches, so E2E runs deterministically offline. The injected-fetch unit tests remain the primary coverage for error paths and payload mapping. `docs/feasibility-report.md` records the evidence.

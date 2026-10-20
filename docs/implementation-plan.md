@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Status: M0-M3 complete and under review. M4.1 (popup target/action workflow) is complete and under review. M4.2 (dashboard link/counts) and M5+ have not started.
+Status: M0-M3 complete and under review. M4.1 (popup target/action workflow) is complete and under review. M4.2 (dashboard workspace, including link/counts, notes, filters, and live updates) is implemented. M5 dashboard deliverables are implemented under M4.2 and await review. M6 release hardening remains.
 
 ## Ground rules
 
@@ -183,11 +183,26 @@ Status: complete, awaiting review. Executed 2026-10-20. This is the approved sub
 - Added 45 deterministic unit/component tests for target resolution, response validation, and popup states, including malformed payloads, command failures, metadata retry, duplicate clicks, and React Strict Mode. The full suite is 19 files / 468 tests.
 - Added deterministic Playwright coverage for unsupported pages, save/reload/remove, track/untrack, and metadata failure/retry. Active-tab detection is stubbed before the popup loads; API requests are routed. E2E is 8/8 with no live GitHub calls.
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm zip`, and `pnpm test:e2e` pass. Production build is 282.70 kB; zip is 87.68 kB. Manifest permissions remain `storage`, `activeTab`, and `https://api.github.com/*`.
-- Not yet implemented, by design: dashboard link and basic saved counts (M4.2), dashboard data binding/note editor (M5), sorting/filtering, and release hardening (M6).
+- Not yet implemented, by design: release hardening (M6). Dashboard link/counts and the dashboard workspace were delivered under M4.2.
+
+### M4.2 - Dashboard workspace
+
+Status: implemented, awaiting review. Executed 2026-10-20. This expanded M4.2 beyond the original dashboard link/counts scope to deliver the approved local dashboard workspace; the M5 deliverables below are therefore implemented under M4.2.
+
+- Implemented `src/entrypoints/dashboard/App.tsx` and `src/hooks/useDashboardWorkflow.ts`: snapshot load/error/retry, collection refresh, counts, search/filter/sort, empty/no-match states, issue removal, PR untracking and manual PR refresh, note editing, per-action pending states, and local snapshot updates.
+- Added `src/components/dashboard/IssueCard.tsx`, `PullRequestCard.tsx`, `IssueNote.tsx`, `RecordBadges.tsx`, `DashboardFilters.tsx`, and `src/lib/dashboard-view.ts`: last-known state labels, bounded sync errors, inline confirmations, note concurrency tokens, and actionable rate-limit/private/deleted-target messaging.
+- Added the popup dashboard link and saved counts in `src/entrypoints/popup/App.tsx`. The link is always available and opens `/dashboard.html` in a new tab; counts come from the same validated snapshot and are not shown on unsupported pages, where storage is not read.
+- Added live dashboard updates in `src/hooks/useDashboardWorkflow.ts` and `src/storage/chrome-storage.ts`: a read-only `StorageReader` subscription receives changed keys only, and the dashboard coalesces relevant `contribflow.*` changes into a `GET_SNAPSHOT` reload. UI code never reads storage or calls GitHub directly.
+- Added deterministic unit/component coverage for filters, counts, issue/PR actions, note concurrency, storage-change coalescing, and popup link/counts. The full suite is 21 files / 510 tests.
+- Added deterministic Playwright coverage for dashboard live updates, note persistence, issue removal, PR refresh/untrack, and the popup dashboard link. E2E is 11/11 with no live GitHub calls.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm zip`, and `pnpm test:e2e` pass. Production build is 315.48 kB; zip is 95.91 kB. Manifest permissions remain `storage`, `activeTab`, and `https://api.github.com/*`.
+- Not yet implemented, by design: release hardening (M6). Search and filtering are now in scope; tags, multiple notes, polling, and background auto-refresh remain out of scope.
 
 ## M5 - Dashboard
 
 Depends on M4.
+
+Status: implemented as part of M4.2; awaiting review. The deliverables below are covered by the M4.2 dashboard workspace.
 
 ### Deliverables
 
@@ -248,4 +263,4 @@ A milestone is done only when:
 
 ## Deferred until after the MVP
 
-Search, filtering, tags, multiple notes, notifications, background polling, auto-refresh, review/CI status, import/export, sync, authentication, private repository metadata, Firefox support, and any GitHub write operation.
+Tags, multiple notes, notifications, background polling, auto-refresh, review/CI status, import/export, sync, authentication, private repository metadata, Firefox support, and any GitHub write operation.

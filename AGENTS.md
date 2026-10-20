@@ -6,7 +6,7 @@ The MVP is local-first: no account, backend, analytics, AI API, or stored GitHub
 
 ## Current status
 
-Foundation (M1), domain/persistence (M2), the GitHub client/background commands (M3), and the popup target/action workflow (M4.1) are implemented: WXT + React + TypeScript (strict) + Tailwind scaffold, active-tab detection, save/track/remove/untrack flows, validated GitHub REST client, typed messaging contracts and client adapter, serialized background command handler, repository with in-memory and Chrome adapters, migration runner, and ESLint/Vitest/Playwright setup. The dashboard remains a shell. M4.2 (dashboard link/counts) and M5+ are not started; do not begin them without approval in `docs/implementation-plan.md`.
+Foundation (M1), domain/persistence (M2), the GitHub client/background commands (M3), popup target/action workflow (M4.1), and the dashboard workspace (M4.2) are implemented: WXT + React + TypeScript (strict) + Tailwind scaffold, active-tab detection, save/track/remove/untrack flows, validated GitHub REST client, typed messaging contracts and client adapter, serialized background command handler, repository with in-memory and Chrome adapters, migration runner, dashboard snapshot/search/filter/action UI, note concurrency protection, popup dashboard link/counts, live storage-change updates, and ESLint/Vitest/Playwright setup. Release hardening (M6) remains; do not begin it without approval in `docs/implementation-plan.md`.
 
 Planning artifacts:
 
