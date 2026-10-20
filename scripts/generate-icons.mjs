@@ -15,7 +15,7 @@ async function generateIcons() {
     // eslint-disable-next-line no-console
     globalThis.console.log(`Generated icon-${size}.png`);
   }
-  
+
   // Also create a 128x128 for good measure
   await sharp(inputSvg)
     .resize(128, 128)
