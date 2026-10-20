@@ -626,6 +626,37 @@ describe('removal', () => {
   });
 });
 
+describe('refresh coalescing', () => {
+  it('shares one GitHub request for concurrent refreshes of the same target', async () => {
+    const issue = savedIssue();
+    const { handler, github } = await setup({ issues: [issue] });
+
+    let signalStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    let releaseFetch: (metadata: GitHubIssueMetadata) => void = () => undefined;
+    const pending = new Promise<GitHubIssueMetadata>((resolve) => {
+      releaseFetch = resolve;
+    });
+    github.setIssueHandler(async () => {
+      signalStarted();
+      return pending;
+    });
+
+    const first = handler.handle({ type: 'REFRESH_ISSUE', url: ISSUE_URL });
+    await started;
+    const second = handler.handle({ type: 'REFRESH_ISSUE', url: ISSUE_URL });
+
+    releaseFetch({ number: 42, title: 'Updated issue title', state: 'open' });
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(github.issueCalls).toHaveLength(1);
+    expect(firstResult).toEqual(secondResult);
+    expect(firstResult).toMatchObject({ ok: true });
+  });
+});
+
 describe('command serialization', () => {
   it('runs commands in order when a GitHub request is in flight', async () => {
     const issue = savedIssue();

@@ -92,6 +92,7 @@ export function createCommandHandler(options: CommandHandlerOptions): CommandHan
   const { repository, github } = options;
   const now = options.now ?? (() => new Date());
   const queue = createSerialQueue();
+  const inFlightRefreshes = new Map<string, Promise<CommandResponse>>();
 
   function toTimestamp(): string {
     return now().toISOString();
@@ -387,6 +388,27 @@ export function createCommandHandler(options: CommandHandlerOptions): CommandHan
     }
   }
 
+  function refreshKey(command: Command): string | null {
+    if (command.type !== 'REFRESH_ISSUE' && command.type !== 'REFRESH_PULL_REQUEST') {
+      return null;
+    }
+    const parsed = parseGitHubUrl(command.url);
+    return parsed.ok ? `${command.type}:${parsed.target.id}` : null;
+  }
+
+  function run(command: Command): Promise<CommandResponse> {
+    return queue.run(async () => {
+      try {
+        return await dispatch(command, toTimestamp());
+      } catch (error) {
+        if (error instanceof CommandFailureSignal) {
+          return commandFailure(error.commandError);
+        }
+        return commandFailure(toCommandError(error));
+      }
+    });
+  }
+
   return {
     async handle(message: unknown): Promise<CommandResponse> {
       const parsed = parseCommandMessage(message);
@@ -394,16 +416,27 @@ export function createCommandHandler(options: CommandHandlerOptions): CommandHan
         return commandFailure(parsed.error);
       }
 
-      return queue.run(async () => {
-        try {
-          return await dispatch(parsed.command, toTimestamp());
-        } catch (error) {
-          if (error instanceof CommandFailureSignal) {
-            return commandFailure(error.commandError);
-          }
-          return commandFailure(toCommandError(error));
-        }
-      });
+      const key = refreshKey(parsed.command);
+      if (key === null) {
+        return run(parsed.command);
+      }
+
+      const existing = inFlightRefreshes.get(key);
+      if (existing !== undefined) {
+        return existing;
+      }
+
+      const task = run(parsed.command);
+      inFlightRefreshes.set(key, task);
+      void task.then(
+        () => {
+          inFlightRefreshes.delete(key);
+        },
+        () => {
+          inFlightRefreshes.delete(key);
+        },
+      );
+      return task;
     },
   };
 }
