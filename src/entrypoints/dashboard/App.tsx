@@ -1,4 +1,6 @@
+import { useMemo, useState } from 'react';
 import { AppShell } from '@/components/AppShell';
+import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { IssueCard } from '@/components/dashboard/IssueCard';
 import { PullRequestCard } from '@/components/dashboard/PullRequestCard';
 import type { StorageSnapshot } from '../../storage/repository';
@@ -7,7 +9,15 @@ import {
   useDashboardWorkflow,
   type DashboardNotice,
 } from '../../hooks/useDashboardWorkflow';
-import { dashboardCounts } from '../../lib/dashboard-view';
+import {
+  DEFAULT_DASHBOARD_FILTERS,
+  dashboardCounts,
+  filterIssues,
+  filterPullRequests,
+  hasActiveFilters,
+  stateFilterOptions,
+  type DashboardFilters as DashboardFiltersValue,
+} from '../../lib/dashboard-view';
 import type { BackgroundClient } from '../../messaging/background-client';
 
 const secondaryButtonClass =
@@ -104,6 +114,32 @@ function DashboardReady({
   notice: DashboardNotice | null;
   onRefresh: () => void;
 }) {
+  const [filters, setFilters] = useState<DashboardFiltersValue>(
+    DEFAULT_DASHBOARD_FILTERS,
+  );
+  const filteredIssues = useMemo(
+    () => filterIssues(snapshot.issues, filters),
+    [snapshot.issues, filters],
+  );
+  const filteredPullRequests = useMemo(
+    () => filterPullRequests(snapshot.pullRequests, filters),
+    [snapshot.pullRequests, filters],
+  );
+  const filtersActive = hasActiveFilters(filters);
+  const noMatches =
+    filtersActive &&
+    filteredIssues.length === 0 &&
+    filteredPullRequests.length === 0;
+  const showIssues = filters.type !== 'pull_request';
+  const showPullRequests = filters.type !== 'issue';
+
+  function updateFilters(next: DashboardFiltersValue): void {
+    const stateIsAllowed = stateFilterOptions(next.type).some(
+      (option) => option.value === next.state,
+    );
+    setFilters(stateIsAllowed ? next : { ...next, state: 'all' });
+  }
+
   if (snapshot.issues.length === 0 && snapshot.pullRequests.length === 0) {
     return (
       <div className="space-y-4">
@@ -153,55 +189,105 @@ function DashboardReady({
       <Summary snapshot={snapshot} />
       <StorageWarnings warnings={snapshot.warnings} />
 
-      <section aria-labelledby="issues-heading">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 id="issues-heading" className="text-sm font-semibold text-ink">
-            Issues
-          </h2>
-          <span className="font-mono text-xs text-muted">
-            {snapshot.issues.length}
-          </span>
-        </div>
-        {snapshot.issues.length === 0 ? (
-          <p className="mt-2 rounded border border-line p-4 text-sm text-muted">
-            No saved issues yet. Save one from the ContribFlow popup.
-          </p>
-        ) : (
-          <div className="mt-2 grid gap-3">
-            {snapshot.issues.map((issue) => (
-              <IssueCard key={issue.id} issue={issue} />
-            ))}
-          </div>
-        )}
-      </section>
+      <DashboardFilters
+        filters={filters}
+        onChange={updateFilters}
+        onClear={() => {
+          setFilters(DEFAULT_DASHBOARD_FILTERS);
+        }}
+      />
 
-      <section aria-labelledby="pull-requests-heading">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2
-            id="pull-requests-heading"
-            className="text-sm font-semibold text-ink"
-          >
-            Pull requests
+      {noMatches ? (
+        <section className="rounded border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold text-ink">
+            No items match your filters
           </h2>
-          <span className="font-mono text-xs text-muted">
-            {snapshot.pullRequests.length}
-          </span>
-        </div>
-        {snapshot.pullRequests.length === 0 ? (
-          <p className="mt-2 rounded border border-line p-4 text-sm text-muted">
-            No tracked pull requests yet. Track one from the ContribFlow popup.
+          <p className="mt-1 text-sm text-muted">
+            Try a different search, type, or state.
           </p>
-        ) : (
-          <div className="mt-2 grid gap-3">
-            {snapshot.pullRequests.map((pullRequest) => (
-              <PullRequestCard
-                key={pullRequest.id}
-                pullRequest={pullRequest}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+          <button
+            type="button"
+            className={`${secondaryButtonClass} mt-3`}
+            onClick={() => {
+              setFilters(DEFAULT_DASHBOARD_FILTERS);
+            }}
+          >
+            Clear filters
+          </button>
+        </section>
+      ) : (
+        <>
+          {showIssues ? (
+            <section aria-labelledby="issues-heading">
+              <div className="flex items-baseline justify-between gap-3">
+                <h2
+                  id="issues-heading"
+                  className="text-sm font-semibold text-ink"
+                >
+                  Issues
+                </h2>
+                <span className="font-mono text-xs text-muted">
+                  {filtersActive
+                    ? `${filteredIssues.length} of ${snapshot.issues.length}`
+                    : snapshot.issues.length}
+                </span>
+              </div>
+              {snapshot.issues.length === 0 ? (
+                <p className="mt-2 rounded border border-line p-4 text-sm text-muted">
+                  No saved issues yet. Save one from the ContribFlow popup.
+                </p>
+              ) : filteredIssues.length === 0 ? (
+                <p className="mt-2 rounded border border-line p-4 text-sm text-muted">
+                  No saved issues match these filters.
+                </p>
+              ) : (
+                <div className="mt-2 grid gap-3">
+                  {filteredIssues.map((issue) => (
+                    <IssueCard key={issue.id} issue={issue} />
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {showPullRequests ? (
+            <section aria-labelledby="pull-requests-heading">
+              <div className="flex items-baseline justify-between gap-3">
+                <h2
+                  id="pull-requests-heading"
+                  className="text-sm font-semibold text-ink"
+                >
+                  Pull requests
+                </h2>
+                <span className="font-mono text-xs text-muted">
+                  {filtersActive
+                    ? `${filteredPullRequests.length} of ${snapshot.pullRequests.length}`
+                    : snapshot.pullRequests.length}
+                </span>
+              </div>
+              {snapshot.pullRequests.length === 0 ? (
+                <p className="mt-2 rounded border border-line p-4 text-sm text-muted">
+                  No tracked pull requests yet. Track one from the ContribFlow
+                  popup.
+                </p>
+              ) : filteredPullRequests.length === 0 ? (
+                <p className="mt-2 rounded border border-line p-4 text-sm text-muted">
+                  No tracked pull requests match these filters.
+                </p>
+              ) : (
+                <div className="mt-2 grid gap-3">
+                  {filteredPullRequests.map((pullRequest) => (
+                    <PullRequestCard
+                      key={pullRequest.id}
+                      pullRequest={pullRequest}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

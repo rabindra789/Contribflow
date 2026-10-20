@@ -46,13 +46,15 @@ const unsyncedIssue: SavedIssue = {
   lastSyncError: 'GitHub metadata sync failed.',
 };
 
+const pullRequestTitle = 'Fix callback inference';
+
 const pullRequest: TrackedPullRequest = {
   id: 'microsoft/typescript#54321',
   owner: 'Microsoft',
   repo: 'TypeScript',
   number: 54321,
   url: 'https://github.com/Microsoft/TypeScript/pull/54321',
-  title: 'Fix callback inference',
+  title: pullRequestTitle,
   state: 'draft',
   addedAt: '2026-10-19T10:00:00.000Z',
   lastSyncedAt: '2026-10-19T10:00:01.000Z',
@@ -282,5 +284,136 @@ describe('dashboard', () => {
       'The extension background service is unavailable.',
     );
     expect(screen.getByRole('heading', { name: issueTitle })).toBeVisible();
+  });
+
+  it('searches saved items by repository, number, and title', async () => {
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    const search = screen.getByLabelText('Search');
+
+    fireEvent.change(search, { target: { value: 'octocat' } });
+
+    expect(
+      screen.getByRole('heading', { name: 'Title unavailable' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: issueTitle }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: pullRequestTitle }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: '54321' } });
+
+    expect(
+      screen.getByRole('heading', { name: pullRequestTitle }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'Title unavailable' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: 'FIX CALLBACK' } });
+
+    expect(
+      screen.getByRole('heading', { name: pullRequestTitle }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: issueTitle }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('filters by type and state while keeping total counts', async () => {
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('group', { name: 'Saved issues: 2' }),
+    ).toBeVisible();
+
+    const type = screen.getByLabelText('Type');
+    const state = screen.getByLabelText('State');
+
+    fireEvent.change(type, { target: { value: 'issue' } });
+
+    expect(
+      screen.queryByRole('heading', { name: 'Pull requests' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Issues' })).toBeVisible();
+    expect(
+      within(state).queryByRole('option', { name: 'Draft' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(type, { target: { value: 'pull_request' } });
+    expect(
+      within(state).getByRole('option', { name: 'Draft' }),
+    ).toBeVisible();
+    fireEvent.change(state, { target: { value: 'draft' } });
+
+    expect(
+      screen.queryByRole('heading', { name: 'Issues' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: pullRequestTitle }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: issueTitle }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('group', { name: 'Saved issues: 2' }),
+    ).toBeVisible();
+    expect(screen.getByText('1 of 1')).toBeVisible();
+
+    fireEvent.change(type, { target: { value: 'issue' } });
+    expect(state).toHaveValue('all');
+  });
+
+  it('shows a no-match state and clears filters', async () => {
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText('Search'), {
+      target: { value: 'no-such-item' },
+    });
+
+    expect(
+      screen.getByRole('heading', { name: 'No items match your filters' }),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear filters' })[0]!);
+
+    expect(screen.getByRole('heading', { name: issueTitle })).toBeVisible();
+    expect(screen.getByLabelText('Search')).toHaveValue('');
   });
 });

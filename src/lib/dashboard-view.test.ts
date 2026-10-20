@@ -3,6 +3,8 @@ import type { IssueNote, SavedIssue, TrackedPullRequest } from '../domain/models
 import type { StorageSnapshot } from '../storage/repository';
 import {
   dashboardCounts,
+  filterIssues,
+  filterPullRequests,
   formatDashboardTimestamp,
   hasActiveFilters,
   stateFilterOptions,
@@ -42,9 +44,35 @@ const note: IssueNote = {
   updatedAt: '2026-10-19T09:25:00.000Z',
 };
 
+const olderIssue: SavedIssue = {
+  id: 'octocat/hello-world#42',
+  owner: 'octocat',
+  repo: 'Hello-World',
+  number: 42,
+  url: 'https://github.com/octocat/Hello-World/issues/42',
+  title: null,
+  state: 'closed',
+  savedAt: '2026-10-18T14:00:00.000Z',
+  lastSyncedAt: null,
+  lastSyncError: null,
+};
+
+const mergedPullRequest: TrackedPullRequest = {
+  id: 'octocat/hello-world#7',
+  owner: 'octocat',
+  repo: 'Hello-World',
+  number: 7,
+  url: 'https://github.com/octocat/Hello-World/pull/7',
+  title: 'Improve docs',
+  state: 'merged',
+  addedAt: '2026-10-18T12:00:00.000Z',
+  lastSyncedAt: '2026-10-18T12:00:01.000Z',
+  lastSyncError: null,
+};
+
 const snapshot: StorageSnapshot = {
-  issues: [issue],
-  pullRequests: [pullRequest],
+  issues: [olderIssue, issue],
+  pullRequests: [mergedPullRequest, pullRequest],
   notes: { [issue.id]: note },
   warnings: [],
 };
@@ -67,8 +95,8 @@ describe('dashboard view helpers', () => {
 
   it('counts saved records and notes', () => {
     expect(dashboardCounts(snapshot)).toEqual({
-      issues: 1,
-      pullRequests: 1,
+      issues: 2,
+      pullRequests: 2,
       notes: 1,
     });
   });
@@ -101,5 +129,66 @@ describe('dashboard view helpers', () => {
     expect(
       hasActiveFilters({ query: '', type: 'all', state: 'open' }),
     ).toBe(true);
+  });
+
+  it('filters issues by repository, number, title, and state', () => {
+    const base = { query: '', type: 'all' as const, state: 'all' as const };
+
+    expect(
+      filterIssues(snapshot.issues, { ...base, query: 'typescript' }).map(
+        (record) => record.id,
+      ),
+    ).toEqual([issue.id]);
+    expect(
+      filterIssues(snapshot.issues, { ...base, query: '#42' }).map(
+        (record) => record.id,
+      ),
+    ).toEqual([olderIssue.id]);
+    expect(
+      filterIssues(snapshot.issues, { ...base, query: 'hello-world 42' }).map(
+        (record) => record.id,
+      ),
+    ).toEqual([olderIssue.id]);
+    expect(
+      filterIssues(snapshot.issues, { ...base, query: 'improve inference' }).map(
+        (record) => record.id,
+      ),
+    ).toEqual([issue.id]);
+    expect(
+      filterIssues(snapshot.issues, { ...base, state: 'closed' }).map(
+        (record) => record.id,
+      ),
+    ).toEqual([olderIssue.id]);
+  });
+
+  it('filters pull requests by type and state', () => {
+    const base = { query: '', type: 'all' as const, state: 'all' as const };
+
+    expect(
+      filterPullRequests(snapshot.pullRequests, { ...base, state: 'draft' }).map(
+        (record) => record.id,
+      ),
+    ).toEqual([pullRequest.id]);
+    expect(
+      filterPullRequests(snapshot.pullRequests, {
+        ...base,
+        type: 'issue',
+      }),
+    ).toEqual([]);
+    expect(
+      filterIssues(snapshot.issues, { ...base, type: 'pull_request' }),
+    ).toEqual([]);
+  });
+
+  it('sorts collections newest first', () => {
+    const base = { query: '', type: 'all' as const, state: 'all' as const };
+
+    expect(filterIssues(snapshot.issues, base).map((record) => record.id)).toEqual([
+      issue.id,
+      olderIssue.id,
+    ]);
+    expect(
+      filterPullRequests(snapshot.pullRequests, base).map((record) => record.id),
+    ).toEqual([pullRequest.id, mergedPullRequest.id]);
   });
 });
