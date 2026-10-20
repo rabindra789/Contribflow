@@ -37,6 +37,7 @@ export interface StorageReader {
 
 export interface StorageRepository extends StorageReader {
   saveIssue(issue: SavedIssue): Promise<void>;
+  updateIssue(issue: SavedIssue): Promise<void>;
   savePullRequest(pullRequest: TrackedPullRequest): Promise<void>;
   saveNote(note: IssueNote): Promise<void>;
   removeIssue(issueId: string): Promise<void>;
@@ -452,6 +453,44 @@ export function createStorageRepository(port: StoragePort): StorageRepository {
         }
 
         await writeItems({ [key]: parsed.value }, metaExists);
+      });
+    },
+
+    async updateIssue(issue: SavedIssue): Promise<void> {
+      const key = issueStorageKey(issue.id);
+      const parsed = parseSavedIssue(key, issue);
+      if (!parsed.ok) {
+        throw invalidRecordError('Issue update', key, parsed);
+      }
+
+      return queue.run(async () => {
+        const records = await readRecords();
+        const metaExists = ensureWritable(records);
+        const existingRaw = records[key];
+
+        if (existingRaw === undefined) {
+          throw new StorageRepositoryError(
+            'missing-issue',
+            `Cannot update issue ${parsed.value.id}: it is not saved.`,
+          );
+        }
+
+        const existing = parseSavedIssue(key, existingRaw);
+        if (!existing.ok) {
+          throw corruptRecordError('Existing issue', key, existing.errors);
+        }
+
+        const next = { ...parsed.value, savedAt: existing.value.savedAt };
+        const revalidated = parseSavedIssue(key, next);
+        if (!revalidated.ok) {
+          throw invalidRecordError('Issue update', key, revalidated);
+        }
+
+        if (shallowEqual(existing.value, revalidated.value)) {
+          return;
+        }
+
+        await writeItems({ [key]: revalidated.value }, metaExists);
       });
     },
 

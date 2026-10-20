@@ -192,6 +192,83 @@ describe('duplicate saves and refreshes', () => {
   });
 });
 
+describe('issue updates', () => {
+  it('updates an existing issue while preserving savedAt and its note', async () => {
+    const key = issueStorageKey(issueA.id);
+    const noteKey = noteStorageKey(issueA.id);
+    const { port, repository } = createMemoryStorageHarness({
+      [META_KEY]: meta,
+      [key]: issueA,
+      [noteKey]: note,
+    });
+    const refreshed: SavedIssue = {
+      ...issueA,
+      title: 'Refreshed title',
+      state: 'closed',
+      savedAt: '2026-10-19T09:00:00.000Z',
+      lastSyncedAt: '2026-10-19T10:00:00.000Z',
+      lastSyncError: null,
+    };
+
+    await repository.updateIssue(refreshed);
+
+    expect(port.get(key)).toEqual({ ...refreshed, savedAt: issueA.savedAt });
+    expect(port.get(noteKey)).toEqual(note);
+    expect(port.setCalls).toBe(1);
+  });
+
+  it('records a sync error without changing successful metadata', async () => {
+    const key = issueStorageKey(issueA.id);
+    const { port, repository } = createMemoryStorageHarness({
+      [META_KEY]: meta,
+      [key]: issueA,
+    });
+
+    await repository.updateIssue({ ...issueA, lastSyncError: 'GitHub request timed out.' });
+
+    expect(port.get(key)).toEqual({ ...issueA, lastSyncError: 'GitHub request timed out.' });
+  });
+
+  it('skips an identical issue update', async () => {
+    const { port, repository } = createMemoryStorageHarness({
+      [META_KEY]: meta,
+      [issueStorageKey(issueA.id)]: issueA,
+    });
+
+    await repository.updateIssue(issueA);
+
+    expect(port.setCalls).toBe(0);
+  });
+
+  it('requires the issue to already exist', async () => {
+    const { port, repository } = createMemoryStorageHarness({ [META_KEY]: meta });
+
+    await expectStorageError(repository.updateIssue(issueA), 'missing-issue');
+    expect(port.setCalls).toBe(0);
+  });
+
+  it('blocks updates over an invalid existing record', async () => {
+    const key = issueStorageKey(issueA.id);
+    const raw = { ...issueA, title: 42 };
+    const { port, repository } = createMemoryStorageHarness({ [META_KEY]: meta, [key]: raw });
+
+    await expectStorageError(repository.updateIssue(issueA), 'corrupt-record');
+    expect(port.get(key)).toEqual(raw);
+    expect(port.setCalls).toBe(0);
+  });
+
+  it('rejects invalid update input before reading storage', async () => {
+    const { port, repository } = createMemoryStorageHarness({ [META_KEY]: meta });
+
+    await expectStorageError(
+      repository.updateIssue({ ...issueA, url: pullRequest.url }),
+      'invalid-record',
+    );
+    expect(port.readCalls).toBe(0);
+    expect(port.setCalls).toBe(0);
+  });
+});
+
 describe('notes', () => {
   it('upserts a note, preserves createdAt, and skips unchanged writes', async () => {
     const key = noteStorageKey(issueA.id);
