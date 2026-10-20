@@ -2,7 +2,7 @@
 
 Status: implemented in M2 for MVP schema version 1. These definitions are the contract for storage, messaging, and tests.
 
-Implementation lives in `src/domain/models.ts`, `validation.ts`, `github-url.ts`, and `pull-request-state.ts`, plus `src/storage/keys.ts`, `repository.ts`, `memory-storage.ts`, `chrome-storage.ts`, and `migrations.ts`. Unit tests are colocated.
+Implementation lives in `src/domain/models.ts`, `validation.ts`, `github-url.ts`, and `pull-request-state.ts`, plus `src/storage/keys.ts`, `repository.ts`, `memory-storage.ts`, `chrome-storage.ts`, and `migrations.ts`. Background commands in `src/background/` and message contracts in `src/messaging/` enforce these rules at the runtime boundary. Unit tests are colocated.
 
 ## Conventions
 
@@ -206,7 +206,8 @@ interface StorageReader {
 }
 
 interface StorageRepository extends StorageReader {
-  saveIssue(issue: SavedIssue): Promise<void>;
+  saveIssue(issue: SavedIssue): Promise<void>;       // insert-only
+  updateIssue(issue: SavedIssue): Promise<void>;     // requires an existing issue
   savePullRequest(pullRequest: TrackedPullRequest): Promise<void>;
   saveNote(note: IssueNote): Promise<void>;          // upsert
   removeIssue(issueId: string): Promise<void>;       // removes its note too
@@ -248,7 +249,7 @@ Write commands reject with the exported `StorageRepositoryError`, whose `kind` i
 | `corrupt-metadata` | Meta is missing alongside data, or is invalid |
 | `unsupported-schema` | Stored metadata is newer than the extension supports |
 | `schema-migration-required` | Stored metadata is older and must be migrated first |
-| `missing-issue` | A note write targets an issue that is not saved |
+| `missing-issue` | A note or issue update targets an issue that is not saved |
 | `quota-exceeded` | Chrome rejected the write because the storage quota was exceeded |
 | `unavailable` | The storage adapter failed for another reason |
 
@@ -257,6 +258,7 @@ The repository is created with `createStorageRepository(port)`. `createMemorySto
 ## Lifecycle rules
 
 - Save issue: insert-only and idempotent by id. A valid existing issue is left unchanged; notes are never overwritten. An invalid existing record blocks the save with `corrupt-record`.
+- Update issue: requires a valid existing issue, preserves the stored `savedAt`, validates the full record, and skips identical writes. Missing issues fail with `missing-issue`; corrupt existing records are left untouched.
 - Save PR: upsert by id. A refresh updates metadata while preserving `addedAt`; identical upserts do not write. An invalid existing record blocks the write.
 - Refresh: replaces the metadata fields only; local timestamps (`savedAt` / `addedAt`) and notes are preserved.
 - Remove issue: removes the issue and note keys in one `remove` call, and also removes an orphan note for that id. Missing keys are a no-op.
@@ -323,7 +325,7 @@ The repository is created with `createStorageRepository(port)`. `createMemorySto
 - The runner is idempotent: a store already at the supported version performs no write. An empty store without data keys is treated as current.
 - Missing steps, duplicate or non-advancing definitions, steps beyond the supported version, malformed metadata, a newer stored version, and thrown migration errors all return typed failures without writing. A failed later step leaves earlier in-memory changes unapplied.
 - Migrations cannot delete keys through this interface; unrelated data and keys outside the namespace are preserved.
-- Migrations run in the background before command handling once command handling exists (M3). Ordinary reads never migrate.
+- The migration runner is not invoked at startup in M3. The v1 registry is empty, repository reads/writes already gate schema versions, and there is no startup UI channel for migration failures; wire the runner with the first non-empty migration. Ordinary reads never migrate.
 - Every migration is tested against stored fixture payloads.
 - Unknown or newer schema versions are never downgraded, rewritten, or cleared.
 - Adding fields may be backward-compatible within v1 only if readers tolerate missing values; any change to required fields or key layout requires a new schema version.

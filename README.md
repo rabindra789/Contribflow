@@ -4,7 +4,7 @@ ContribFlow is a local-first Chrome (Manifest V3) extension for individual GitHu
 
 The MVP is local: no account, no backend, no analytics, and no stored GitHub credentials.
 
-Current status: milestones M1 (foundation) and M2 (domain and persistence) are complete. The extension still has UI shells; GitHub API access, background commands, and the popup/dashboard workflows come in later milestones. See `docs/implementation-plan.md`.
+Current status: milestones M1 (foundation), M2 (domain and persistence), and M3 (GitHub client and background commands) are complete. The extension still has UI shells; the popup/dashboard workflows come in later milestones. See `docs/implementation-plan.md`.
 
 ## Requirements
 
@@ -73,7 +73,12 @@ It does not request `tabs`, `scripting`, `alarms`, identity, or access to `githu
 
 ```text
 src/
-  entrypoints/    popup, dashboard, and background service worker
+  entrypoints/    popup, dashboard, and background service worker listener
+  background/     command validation, routing, serialization, error mapping
+  github/         validated REST client, rate-limit parsing, typed errors
+  messaging/      typed command contracts and runtime validation
+  storage/        repository contract, adapters, migrations
+  domain/         models, validators, URL parsing, state rules
   components/     shared React UI
   styles/         Tailwind CSS entry and design tokens
   test/           Vitest setup

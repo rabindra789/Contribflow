@@ -6,7 +6,7 @@ The MVP is local-first: no account, backend, analytics, AI API, or stored GitHub
 
 ## Current status
 
-Foundation (M1) and domain/persistence (M2) are complete: WXT + React + TypeScript (strict) + Tailwind scaffold, popup and dashboard shells, background service-worker stub, domain models/validators/URL parsing, repository with in-memory and Chrome adapters, migration runner, and ESLint/Vitest/Playwright setup. No GitHub client, messaging, or product workflows are implemented yet. Start M3 only after approval in `docs/implementation-plan.md`.
+Foundation (M1), domain/persistence (M2), and the GitHub client/background commands (M3) are complete: WXT + React + TypeScript (strict) + Tailwind scaffold, popup and dashboard shells, validated GitHub REST client, typed messaging contracts, serialized background command handler, repository with in-memory and Chrome adapters, migration runner, and ESLint/Vitest/Playwright setup. Product UI workflows are not implemented yet. Start M4 only after approval in `docs/implementation-plan.md`.
 
 Planning artifacts:
 
@@ -43,11 +43,12 @@ Run typecheck, lint, and the relevant tests before declaring work complete. Do n
 ## Boundaries
 
 - `src/entrypoints/` - popup, dashboard, background service worker only.
+- `src/background/` - command validation, routing, serialization, refresh coalescing, and error serialization.
 - `src/components/` - shared React UI; no storage or network calls.
 - `src/domain/` - pure types, validation, URL parsing, status rules. Never import React, WXT, or Chrome APIs.
 - `src/storage/` - repository contract, in-memory and Chrome adapters, keys, migrations. Only adapter files may touch `chrome.storage` or WXT browser APIs.
-- `src/github/` - GitHub REST client, response mapping, errors. Inject `fetch` for tests.
-- `src/messaging/` - typed UI-to-background contracts.
+- `src/github/` - GitHub REST client, response validation, rate-limit parsing, errors. Inject `fetch` for tests.
+- `src/messaging/` - typed UI-to-background contracts and runtime message validation.
 - `src/hooks/`, `src/lib/`, `src/styles/` - UI data hooks, utilities, design tokens.
 - Unit tests live beside source as `*.test.ts(x)`; Playwright tests live in `e2e/`.
 
@@ -55,6 +56,7 @@ Run typecheck, lint, and the relevant tests before declaring work complete. Do n
 
 - UI reads storage through the repository and subscribes to changes. All persistence mutations and all GitHub requests go through the background service worker via typed messages.
 - Validate every persisted record on read. Skip invalid records without deleting them and surface the problem. Schema changes require a migration.
+- Validate every runtime message and every GitHub response. Malformed messages never reach storage or network code, and raw responses and message contents are never persisted or logged.
 - Repository mutations are serialized per instance and re-read state before writing. The single background worker is the only writer; do not claim multi-context transactions that Chrome storage does not provide.
 - Keep TypeScript strict. Do not use `any` without a documented reason.
 - Request only the approved permissions: `storage`, `activeTab`, and host access to `https://api.github.com/*`. Permission changes require a docs update and approval.

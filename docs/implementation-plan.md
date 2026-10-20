@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Status: M0-M2 complete and under review. M3 (GitHub client and background commands) has not started.
+Status: M0-M3 complete and under review. M4 (popup workflow) has not started.
 
 ## Ground rules
 
@@ -119,7 +119,7 @@ Depends on M2.
 
 ### Deliverables
 
-- GitHub REST client with injected `fetch`, 10-second abort timeout, DTO guards, mapping, and typed errors (`not_found`, `rate_limited`, `network`, `timeout`, `invalid_response`, `server`).
+- GitHub REST client with injected `fetch`, 10-second abort timeout, runtime response validation, and typed errors for invalid input, not found, rate limit, network, timeout, unexpected HTTP, malformed response, and wrong target kind.
 - Rate-limit reset extraction and user-facing, bounded error messages.
 - Typed message contracts with runtime payload validation and a result envelope.
 - Background handlers for save issue, track/refresh PR, refresh issue, remove issue (with note), remove PR, save note, and delete note.
@@ -134,6 +134,21 @@ Depends on M2.
 - Concurrent commands do not lose updates.
 - No raw GitHub response is persisted; no request headers or secrets are stored.
 - UI code has no write access or direct GitHub access; the background is the only writer.
+
+### Results
+
+Status: complete, awaiting review. Executed 2026-10-20.
+
+- Implemented `src/github/client.ts`, `errors.ts`, and `rate-limit.ts`: fixed `api.github.com` endpoints, encoded owner/repo paths, no credentials, required API headers, 10-second `AbortController` timeout, injected `fetch`, runtime payload validation, issue-vs-PR detection through `pull_request`, and stored-state derivation for pull requests.
+- Rate limits are recognized only from 429, `x-ratelimit-remaining: 0`, or `Retry-After`; a 403 without that evidence is a typed HTTP failure, not a rate limit. Reset/retry timing is bounded and optional headers are tolerated.
+- Implemented `src/messaging/contracts.ts` with nine commands, strict runtime parsing, explicit extra-field rejection, a discriminated result envelope, and a serializable error taxonomy. Malformed messages never reach storage or network code.
+- Implemented `src/background/command-handler.ts` and `errors.ts`: one command handler over injected repository/GitHub/clock, a serialized command queue, identical in-flight refresh coalescing, placeholder-first saves, metadata updates, bounded sync errors, removal cascades, and safe mapping of GitHub/storage/unknown failures.
+- Added `StorageRepository.updateIssue` because M2 `saveIssue` is intentionally insert-only; updates preserve `savedAt`, require an existing valid issue, and no-op when unchanged.
+- Wired one WXT runtime listener in `src/entrypoints/background.ts`; it ignores non-command messages, handles command-shaped messages, and always sends a structured response without logging message contents.
+- The migration runner remains unwired at startup: the v1 registry is empty, the repository already gates older/newer/corrupt metadata, and there is no startup UI channel for failures. Wire it with the first non-empty migration.
+- Added deterministic unit coverage for the client, rate limits, contracts, error mapping, and command handler; added an E2E messaging flow that mocks `api.github.com`, validates a command, saves, rejects a duplicate network call, reads the snapshot, and removes the issue.
+- Full unit suite: 15 files, 423 tests passing. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm zip`, and `pnpm test:e2e` (5 tests) pass. Production build is 259.01 kB; zip is 81.05 kB. Manifest permissions are unchanged.
+- Not yet implemented, by design: popup save/track workflow, dashboard data binding/note editor, sorting/filtering, and release hardening. Those begin in M4-M6.
 
 ## M4 - Popup workflow
 
