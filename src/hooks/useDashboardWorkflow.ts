@@ -22,6 +22,7 @@ export type DashboardViewState =
 export type DashboardActionKind =
   | 'remove-issue'
   | 'untrack-pull-request'
+  | 'refresh-pull-request'
   | 'save-note'
   | 'delete-note';
 
@@ -39,6 +40,7 @@ export interface DashboardWorkflow {
   refreshCollection(): Promise<void>;
   removeIssue(issueId: string): Promise<boolean>;
   untrackPullRequest(pullRequestId: string): Promise<boolean>;
+  refreshPullRequest(pullRequestId: string): Promise<boolean>;
   saveNote(
     issueId: string,
     body: string,
@@ -73,6 +75,18 @@ function removeIssueFromSnapshot(
     ...snapshot,
     issues: snapshot.issues.filter((issue) => issue.id !== issueId),
     notes,
+  };
+}
+
+function upsertPullRequest(
+  snapshot: StorageSnapshot,
+  pullRequest: StorageSnapshot['pullRequests'][number],
+): StorageSnapshot {
+  return {
+    ...snapshot,
+    pullRequests: snapshot.pullRequests.map((candidate) =>
+      candidate.id === pullRequest.id ? pullRequest : candidate,
+    ),
   };
 }
 
@@ -170,6 +184,7 @@ export function useDashboardWorkflow(
     task: (
       snapshot: StorageSnapshot,
     ) => Promise<{ snapshot: StorageSnapshot; message: string }>,
+    options: { formatError?: (error: unknown) => string } = {},
   ): Promise<boolean> {
     if (busyRef.current || state.status !== 'ready') {
       return false;
@@ -188,7 +203,12 @@ export function useDashboardWorkflow(
       return true;
     } catch (error) {
       if (mountedRef.current) {
-        setNotice({ tone: 'error', message: errorMessage(error) });
+        setNotice({
+          tone: 'error',
+          message: options.formatError
+            ? options.formatError(error)
+            : errorMessage(error),
+        });
       }
       return false;
     } finally {
@@ -234,6 +254,49 @@ export function useDashboardWorkflow(
           snapshot: removePullRequestFromSnapshot(snapshot, pullRequestId),
           message: 'The pull request was untracked.',
         };
+      },
+    );
+  }
+
+  function refreshPullRequest(pullRequestId: string): Promise<boolean> {
+    if (state.status !== 'ready') {
+      return Promise.resolve(false);
+    }
+    const pullRequest = state.snapshot.pullRequests.find(
+      (candidate) => candidate.id === pullRequestId,
+    );
+    if (pullRequest === undefined) {
+      return Promise.resolve(false);
+    }
+
+    return runAction(
+      { kind: 'refresh-pull-request', id: pullRequestId },
+      async (snapshot) => {
+        async function reloadLatestSnapshot(): Promise<void> {
+          try {
+            const latest = await client.getSnapshot();
+            if (mountedRef.current) {
+              setState({ status: 'ready', snapshot: latest });
+            }
+          } catch {
+            return;
+          }
+        }
+
+        try {
+          const result = await client.refreshPullRequest(pullRequest.url);
+          return {
+            snapshot: upsertPullRequest(snapshot, result.pullRequest),
+            message: 'The pull request was refreshed from GitHub.',
+          };
+        } catch (error) {
+          await reloadLatestSnapshot();
+          throw error;
+        }
+      },
+      {
+        formatError: (error) =>
+          `Refresh failed: ${errorMessage(error)} The last known state is still shown.`,
       },
     );
   }
@@ -298,6 +361,7 @@ export function useDashboardWorkflow(
     refreshCollection,
     removeIssue,
     untrackPullRequest,
+    refreshPullRequest,
     saveNote,
     deleteNote,
   };

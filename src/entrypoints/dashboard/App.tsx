@@ -111,6 +111,7 @@ function DashboardReady({
   onRefresh,
   onRemoveIssue,
   onUntrackPullRequest,
+  onRefreshPullRequest,
   onSaveNote,
   onDeleteNote,
 }: {
@@ -121,6 +122,7 @@ function DashboardReady({
   onRefresh: () => void;
   onRemoveIssue: (issueId: string) => Promise<boolean>;
   onUntrackPullRequest: (pullRequestId: string) => Promise<boolean>;
+  onRefreshPullRequest: (pullRequestId: string) => Promise<boolean>;
   onSaveNote: (
     issueId: string,
     body: string,
@@ -320,11 +322,16 @@ function DashboardReady({
                       key={pullRequest.id}
                       pullRequest={pullRequest}
                       actionsDisabled={actionsDisabled}
-                      pending={
+                      untrackPending={
                         pending?.kind === 'untrack-pull-request' &&
                         pending.id === pullRequest.id
                       }
+                      refreshPending={
+                        pending?.kind === 'refresh-pull-request' &&
+                        pending.id === pullRequest.id
+                      }
                       onUntrack={() => onUntrackPullRequest(pullRequest.id)}
+                      onRefresh={() => onRefreshPullRequest(pullRequest.id)}
                     />
                   ))}
                 </div>
@@ -386,6 +393,7 @@ export function DashboardApp({ client }: DashboardAppProps) {
           }}
           onRemoveIssue={workflow.removeIssue}
           onUntrackPullRequest={workflow.untrackPullRequest}
+          onRefreshPullRequest={workflow.refreshPullRequest}
           onSaveNote={workflow.saveNote}
           onDeleteNote={workflow.deleteNote}
         />

@@ -610,6 +610,139 @@ describe('dashboard', () => {
     ).toBeVisible();
   });
 
+  it('refreshes a tracked pull request and shows the updated state', async () => {
+    const refreshedPullRequest: TrackedPullRequest = {
+      ...pullRequest,
+      state: 'merged',
+      lastSyncedAt: '2026-10-20T12:10:00.000Z',
+      lastSyncError: null,
+    };
+    const refreshPullRequest = vi
+      .fn<BackgroundClient['refreshPullRequest']>()
+      .mockResolvedValue({ pullRequest: refreshedPullRequest });
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          refreshPullRequest,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: pullRequestTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Refresh Microsoft/TypeScript#54321 from GitHub',
+      }),
+    );
+
+    expect(
+      await screen.findByText('The pull request was refreshed from GitHub.'),
+    ).toBeVisible();
+    expect(refreshPullRequest).toHaveBeenCalledWith(pullRequest.url);
+    expect(screen.getByText('Last known: Merged')).toBeVisible();
+    expect(screen.getByText('2026-10-20 12:10 UTC')).toBeVisible();
+  });
+
+  it('keeps the last known PR state and surfaces refresh errors', async () => {
+    const syncError =
+      'GitHub rate limit reached. Try again in 60 seconds.';
+    const failedSnapshot: StorageSnapshot = {
+      ...populatedSnapshot,
+      pullRequests: [{ ...pullRequest, lastSyncError: syncError }],
+    };
+    const getSnapshot = vi
+      .fn<BackgroundClient['getSnapshot']>()
+      .mockResolvedValueOnce(populatedSnapshot)
+      .mockResolvedValueOnce(failedSnapshot);
+    const refreshPullRequest = vi
+      .fn<BackgroundClient['refreshPullRequest']>()
+      .mockRejectedValue(
+        new BackgroundClientError('command-failed', syncError, {
+          code: 'rate-limited',
+          message: syncError,
+          status: 429,
+          retryAfterSeconds: 60,
+        }),
+      );
+    render(
+      <DashboardApp
+        client={createClient({ getSnapshot, refreshPullRequest })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: pullRequestTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Refresh Microsoft/TypeScript#54321 from GitHub',
+      }),
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(`Refresh failed: ${syncError}`);
+    expect(alert).toHaveTextContent('The last known state is still shown.');
+    expect(screen.getByText('Last known: Draft')).toBeVisible();
+    expect(screen.queryByText('Last known: Merged')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Last sync failed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(syncError).length).toBeGreaterThan(0);
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('prevents duplicate PR refreshes while the request is pending', async () => {
+    const pendingRefresh = deferred<
+      Awaited<ReturnType<BackgroundClient['refreshPullRequest']>>
+    >();
+    const refreshPullRequest = vi
+      .fn<BackgroundClient['refreshPullRequest']>()
+      .mockReturnValue(pendingRefresh.promise);
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          refreshPullRequest,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: pullRequestTitle }),
+    ).toBeVisible();
+    const refreshButton = screen.getByRole('button', {
+      name: 'Refresh Microsoft/TypeScript#54321 from GitHub',
+    });
+    fireEvent.click(refreshButton);
+    fireEvent.click(refreshButton);
+
+    expect(refreshPullRequest).toHaveBeenCalledTimes(1);
+    expect(refreshButton).toBeDisabled();
+    expect(refreshButton).toHaveTextContent('Refreshing...');
+
+    await act(async () => {
+      pendingRefresh.resolve({
+        pullRequest: {
+          ...pullRequest,
+          state: 'merged',
+          lastSyncedAt: '2026-10-20T12:10:00.000Z',
+        },
+      });
+      await pendingRefresh.promise;
+    });
+
+    expect(
+      await screen.findByText('The pull request was refreshed from GitHub.'),
+    ).toBeVisible();
+    expect(refreshPullRequest).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Last known: Merged')).toBeVisible();
+  });
+
   it('adds a private note and displays it with the issue', async () => {
     const createdNote: IssueNote = {
       ...note,

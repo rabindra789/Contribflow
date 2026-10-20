@@ -6,15 +6,19 @@ import { StateBadge, SyncDetails } from './RecordBadges';
 interface PullRequestCardProps {
   pullRequest: TrackedPullRequest;
   actionsDisabled: boolean;
-  pending: boolean;
+  untrackPending: boolean;
+  refreshPending: boolean;
   onUntrack(): Promise<boolean>;
+  onRefresh(): Promise<boolean>;
 }
 
 export function PullRequestCard({
   pullRequest,
   actionsDisabled,
-  pending,
+  untrackPending,
+  refreshPending,
   onUntrack,
+  onRefresh,
 }: PullRequestCardProps) {
   const headingId = useId();
   const [confirming, setConfirming] = useState(false);
@@ -81,27 +85,42 @@ export function PullRequestCard({
               className={primaryButtonClass}
               disabled={actionsDisabled}
               aria-label={
-                pending ? 'Untracking pull request...' : `Confirm untracking ${reference}`
+                untrackPending
+                  ? 'Untracking pull request...'
+                  : `Confirm untracking ${reference}`
               }
               onClick={() => {
                 void confirmUntrack();
               }}
             >
-              {pending ? 'Untracking...' : 'Untrack'}
+              {untrackPending ? 'Untracking...' : 'Untrack'}
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            className={quietButtonClass}
-            disabled={actionsDisabled}
-            aria-label={`Untrack ${reference}`}
-            onClick={() => {
-              setConfirming(true);
-            }}
-          >
-            Untrack
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              className={secondaryButtonClass}
+              disabled={actionsDisabled}
+              aria-label={`Refresh ${reference} from GitHub`}
+              onClick={() => {
+                void onRefresh();
+              }}
+            >
+              {refreshPending ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button
+              type="button"
+              className={quietButtonClass}
+              disabled={actionsDisabled}
+              aria-label={`Untrack ${reference}`}
+              onClick={() => {
+                setConfirming(true);
+              }}
+            >
+              Untrack
+            </button>
+          </div>
         )}
       </div>
     </article>
