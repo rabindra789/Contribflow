@@ -106,11 +106,18 @@ function createClient(overrides: Partial<BackgroundClient> = {}): BackgroundClie
 function renderPopup(
   detection: ActiveTargetResult,
   client: BackgroundClient,
+  dashboardUrl = 'chrome-extension://test/dashboard.html',
 ): ReturnType<typeof vi.fn<() => Promise<ActiveTargetResult>>> {
   const detectTarget = vi
     .fn<() => Promise<ActiveTargetResult>>()
     .mockResolvedValue(detection);
-  render(<PopupApp client={client} detectTarget={detectTarget} />);
+  render(
+    <PopupApp
+      client={client}
+      detectTarget={detectTarget}
+      dashboardUrl={dashboardUrl}
+    />,
+  );
   return detectTarget;
 }
 
@@ -174,6 +181,53 @@ describe('popup workflow', () => {
 
     expect(screen.getByText('Checking the active tab...')).toBeVisible();
     await waitFor(() => expect(detectTarget).toHaveBeenCalledTimes(2));
+  });
+
+  it('links to the dashboard and shows saved counts', async () => {
+    const client = createClient({
+      getSnapshot: vi
+        .fn<BackgroundClient['getSnapshot']>()
+        .mockResolvedValue({
+          ...emptySnapshot,
+          issues: [issue],
+          pullRequests: [pullRequest],
+        }),
+    });
+    renderPopup(
+      supported(issueTarget),
+      client,
+      'chrome-extension://test/dashboard.html',
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    const link = screen.getByRole('link', { name: 'Open dashboard' });
+    expect(link).toHaveAttribute(
+      'href',
+      'chrome-extension://test/dashboard.html',
+    );
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer');
+    expect(
+      screen.getByLabelText('Saved and tracked items'),
+    ).toHaveTextContent('1 saved issue · 1 tracked PR');
+  });
+
+  it('shows the dashboard link without counts on an unsupported page', async () => {
+    const client = createClient();
+    renderPopup(
+      { status: 'unsupported', message: UNSUPPORTED_ACTIVE_PAGE_MESSAGE },
+      client,
+    );
+
+    expect(
+      await screen.findByRole('link', { name: 'Open dashboard' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByLabelText('Saved and tracked items'),
+    ).not.toBeInTheDocument();
+    expect(client.getSnapshot).not.toHaveBeenCalled();
   });
 
   it('shows the missing-tab message', async () => {

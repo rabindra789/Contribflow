@@ -1,3 +1,4 @@
+import { browser } from 'wxt/browser';
 import { AppShell } from '@/components/AppShell';
 import type { SavedIssue, TrackedPullRequest } from '../../domain/models';
 import {
@@ -8,6 +9,7 @@ import {
 import type { ActiveTargetResult } from '../../lib/active-target';
 import type { ResolvedTarget } from '../../lib/popup-target';
 import type { BackgroundClient } from '../../messaging/background-client';
+import type { StorageSnapshot } from '../../storage/repository';
 
 const primaryButtonClass =
   'rounded border border-ink bg-ink px-3 py-1.5 text-xs font-medium text-canvas disabled:cursor-not-allowed disabled:opacity-50';
@@ -58,6 +60,38 @@ function Notice({ notice }: { notice: PopupNotice }) {
     >
       {notice.message}
     </p>
+  );
+}
+
+function DashboardFooter({
+  dashboardUrl,
+  snapshot,
+}: {
+  dashboardUrl: string;
+  snapshot: StorageSnapshot | null;
+}) {
+  return (
+    <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+      <a
+        href={dashboardUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="text-xs font-medium text-ink underline underline-offset-2"
+      >
+        Open dashboard
+      </a>
+      {snapshot !== null ? (
+        <p
+          className="text-xs text-muted"
+          aria-label="Saved and tracked items"
+        >
+          {snapshot.issues.length} saved{' '}
+          {snapshot.issues.length === 1 ? 'issue' : 'issues'} ·{' '}
+          {snapshot.pullRequests.length} tracked{' '}
+          {snapshot.pullRequests.length === 1 ? 'PR' : 'PRs'}
+        </p>
+      ) : null}
+    </footer>
   );
 }
 
@@ -215,11 +249,14 @@ function TargetCard({
 export interface PopupAppProps {
   client?: BackgroundClient;
   detectTarget?: () => Promise<ActiveTargetResult>;
+  dashboardUrl?: string;
 }
 
-export function PopupApp({ client, detectTarget }: PopupAppProps) {
+export function PopupApp({ client, detectTarget, dashboardUrl }: PopupAppProps) {
   const workflow = usePopupWorkflow({ client, detectTarget });
   const { state, pending, notice } = workflow;
+  const resolvedDashboardUrl =
+    dashboardUrl ?? browser.runtime.getURL('/dashboard.html');
 
   return (
     <AppShell
@@ -286,6 +323,11 @@ export function PopupApp({ client, detectTarget }: PopupAppProps) {
             {notice !== null ? <Notice notice={notice} /> : null}
           </>
         ) : null}
+
+        <DashboardFooter
+          dashboardUrl={resolvedDashboardUrl}
+          snapshot={state.status === 'ready' ? state.snapshot : null}
+        />
       </div>
     </AppShell>
   );
