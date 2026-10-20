@@ -34,6 +34,12 @@ const mergedPullRequestMetadata = {
   merged_at: '2026-10-19T10:00:00Z',
 };
 
+const refreshedIssueMetadata = {
+  ...issueMetadata,
+  title: 'Refreshed E2E issue',
+  state: 'closed',
+};
+
 test('popup shows an unsupported-page state without a GitHub tab', async ({
   page,
   extensionId,
@@ -317,6 +323,137 @@ test('dashboard shows a tracked PR, refreshes it, and untracks it', async ({
   await expect(
     page.getByRole('heading', { name: 'E2E pull request merged' }),
   ).toHaveCount(0);
+});
+
+test('dashboard shows an issue, refreshes it successfully', async ({
+  page,
+  extensionId,
+  context,
+}) => {
+  let apiCalls = 0;
+  await context.route('https://api.github.com/**', async (route) => {
+    apiCalls += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        apiCalls === 1 ? issueMetadata : refreshedIssueMetadata,
+      ),
+    });
+  });
+  await page.addInitScript((activeUrl) => {
+    chrome.tabs.query = async () => [{ url: activeUrl }];
+  }, issueUrl);
+
+  await page.goto(`chrome-extension://${extensionId}/popup.html`);
+  await page.getByRole('button', { name: 'Save issue' }).click();
+  await expect(page.getByText('The issue was saved.')).toBeVisible();
+
+  await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
+  await expect(
+    page.getByRole('heading', { name: 'E2E issue' }),
+  ).toBeVisible();
+
+  await page
+    .getByRole('button', { name: 'Refresh octocat/Hello-World#42 from GitHub' })
+    .click();
+
+  await expect(page.getByText('The issue was refreshed from GitHub.')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Refreshed E2E issue' }),
+  ).toBeVisible();
+  await expect(page.getByText('Last known: Closed')).toBeVisible();
+  await expect(page.getByText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/)).toBeVisible();
+  expect(apiCalls).toBe(2);
+});
+
+test('dashboard issue refresh failure preserves last-known metadata', async ({
+  page,
+  extensionId,
+  context,
+}) => {
+  let apiCalls = 0;
+  const syncError = 'GitHub rate limit reached. Try again later.';
+  await context.route('https://api.github.com/**', async (route) => {
+    apiCalls += 1;
+    if (apiCalls === 1) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(issueMetadata),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 429,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: syncError }),
+    });
+  });
+  await page.addInitScript((activeUrl) => {
+    chrome.tabs.query = async () => [{ url: activeUrl }];
+  }, issueUrl);
+
+  await page.goto(`chrome-extension://${extensionId}/popup.html`);
+  await page.getByRole('button', { name: 'Save issue' }).click();
+  await expect(page.getByText('The issue was saved.')).toBeVisible();
+
+  await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
+  await expect(
+    page.getByRole('heading', { name: 'E2E issue' }),
+  ).toBeVisible();
+
+  await page
+    .getByRole('button', { name: 'Refresh octocat/Hello-World#42 from GitHub' })
+    .click();
+
+  const alert = await page.getByRole('alert');
+  await expect(alert).toContainText('Refresh failed');
+  await expect(alert).toContainText('rate limit');
+  await expect(alert).toContainText('Try again later');
+  await expect(alert).toContainText('The last known state is still shown.');
+  await expect(page.getByText('Last known: Open')).toBeVisible();
+  await expect(page.getByText('Last sync failed')).toBeVisible();
+  await expect(page.getByText('Last sync failed').locator('..').getByText(syncError, { exact: true })).toBeVisible();
+  expect(apiCalls).toBe(2);
+});
+
+test('dashboard note edit does not issue GitHub API requests', async ({
+  page,
+  extensionId,
+  context,
+}) => {
+  let apiCalls = 0;
+  await context.route('https://api.github.com/**', async (route) => {
+    apiCalls += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(issueMetadata),
+    });
+  });
+  await page.addInitScript((activeUrl) => {
+    chrome.tabs.query = async () => [{ url: activeUrl }];
+  }, issueUrl);
+
+  await page.goto(`chrome-extension://${extensionId}/popup.html`);
+  await page.getByRole('button', { name: 'Save issue' }).click();
+  await expect(page.getByText('The issue was saved.')).toBeVisible();
+
+  await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
+  await expect(
+    page.getByRole('heading', { name: 'E2E issue' }),
+  ).toBeVisible();
+
+  // Add a note via UI
+  await page
+    .getByRole('button', { name: 'Add note for octocat/Hello-World#42' })
+    .click();
+  await page.getByLabel('Note', { exact: true }).fill('E2E note body');
+  await page.getByRole('button', { name: 'Save note' }).click();
+
+  await expect(page.getByText('E2E note body')).toBeVisible();
+  expect(apiCalls).toBe(1); // only the initial issue save
 });
 
 test('dashboard renders the ContribFlow shell', async ({ page, extensionId }) => {
