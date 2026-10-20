@@ -6,13 +6,14 @@ The MVP is local-first: no account, backend, analytics, AI API, or stored GitHub
 
 ## Current status
 
-Planning only. The repository intentionally contains no application code or tooling yet. Do not scaffold, add dependencies, or implement features until the user approves `docs/implementation-plan.md`.
+Foundation complete through milestone M1: WXT + React + TypeScript (strict) + Tailwind scaffold, popup and dashboard shells, background service-worker stub, ESLint/Vitest/Playwright setup, and build/zip scripts. No product features are implemented yet. Start M2 (domain and persistence) only after approval in `docs/implementation-plan.md`.
 
 Planning artifacts:
 
 - `docs/architecture.md` - system design, boundaries, permissions, risks
 - `docs/data-models.md` - persisted models and storage contracts
 - `docs/implementation-plan.md` - milestones and verification
+- `docs/feasibility-report.md` - M0 evidence, candidate version pins, and deferred M1 checks
 
 ## Stack
 
@@ -23,9 +24,9 @@ Planning artifacts:
 - Vitest for unit tests; Playwright for browser tests where appropriate
 - `chrome.storage.local`; anonymous public GitHub REST API requests
 
-## Expected commands
+## Commands
 
-Added during milestone M1:
+Available from milestone M1:
 
 | Command | Purpose |
 | --- | --- |

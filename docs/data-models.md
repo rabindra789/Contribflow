@@ -139,8 +139,9 @@ Rules:
 - Reserved paths such as `/issues/new` and non-numeric numbers are rejected.
 - Owner and repo are syntax-checked before use.
 - The result includes `kind`, `owner`, `repo`, `number`, `url`, and canonical `id`.
+- GitHub redirects `/issues/<number>` to `/pull/<number>` when that number belongs to a pull request (observed in M0: `octocat/Hello-World/issues/1` -> `/pull/1`). The final, post-redirect tab URL decides whether the target is an issue or a pull request.
 
-Parsing is pure and table-tested. The active tab URL is read only after the user invokes the extension; no DOM inspection is used.
+Parsing is pure and table-tested. The active tab URL is read only after the user invokes the extension; no DOM inspection is used. The popup parses the tab's final URL, so a redirected target is classified by the page actually shown.
 
 ## Storage layout
 

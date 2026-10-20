@@ -193,7 +193,7 @@ API calls happen only on explicit save, track, or refresh actions. No `alarms` p
 
 Not requested: `tabs`, `scripting`, `alarms`, `identity`, `cookies`, `unlimitedStorage`, `<all_urls>`, or access to `https://github.com/*`.
 
-The final manifest is audited in milestone M1, and permission behavior is verified in Chrome in M4. If `activeTab` does not expose the URL in the popup, the fallback is an explicit URL input, not a broader permission; this would be raised for approval.
+The final manifest is audited in milestone M1. The M0 spike verified in Chrome 155 that `activeTab` exposes the URL and title to the popup on GitHub and non-GitHub pages, and exposes nothing on restricted pages such as `chrome://` (the popup shows an empty state). The fallback of an explicit URL input, not a broader permission, is therefore not needed; behavior is re-checked in M4.
 
 ## Security and privacy
 
@@ -223,23 +223,24 @@ The final manifest is audited in milestone M1, and permission behavior is verifi
 | --- | --- | --- |
 | Unit | Vitest (Node) | URL parsing and canonicalization, validators, key rules, status derivation, migrations, repository with an in-memory adapter, GitHub mapping/error handling with fake `fetch`, message payload validation, sorting |
 | Component | Vitest + Testing Library (jsdom) | Popup target/save states, note editor, list empty/loading/error states, status badges |
-| End-to-end | Playwright with a persistent Chromium context | Extension loads, popup save/track flow, dashboard note persistence, refresh failure messaging, removal, reload persistence |
+| End-to-end | Playwright with a persistent bundled Chromium (Chrome for Testing) context | Extension loads, popup save/track flow, dashboard note persistence, refresh failure messaging, removal, reload persistence |
 | Manual Chrome checks | Chrome | Permission prompts/manifest, `activeTab` behavior, CSP, network panel shows only `api.github.com`, persistence after browser restart |
 
-Playwright tests must not depend on the live GitHub API. A short feasibility spike in M0 confirms whether extension service-worker requests can be intercepted reliably. If not, the fallback is to keep the GitHub client covered by injected-fetch unit tests and drive E2E through deterministic storage/state setup.
+Playwright tests must not depend on the live GitHub API. Playwright loads extensions with its bundled Chromium because branded Chrome can no longer install unpacked extensions via command-line flags (removed in Chrome 137); M1 verified that the production build loads in headless bundled Chromium and that `browserContext.route()` intercepts service-worker `api.github.com` fetches, so E2E runs deterministically offline. The injected-fetch unit tests remain the primary coverage for error paths and payload mapping. `docs/feasibility-report.md` records the evidence.
 
 ## Technical risks
 
 | Risk | Impact | Mitigation | How to verify |
 | --- | --- | --- | --- |
 | Anonymous API limit (60 requests/hour/IP) and private repos | Refresh/save metadata fails | Fetch only on explicit actions; cache; allow saving without metadata; show reset time; no retries or polling | Fake-fetch unit tests for 403/429; E2E mocked rate-limit state; manual check of message and reset display |
-| Playwright cannot intercept MV3 service-worker fetches | E2E network mocking is flaky or impossible | M0 spike; fallback to fake-fetch unit tests plus deterministic seeded E2E; never call live API in CI | Spike result recorded before M1; E2E runs offline and deterministically |
+| Playwright cannot intercept MV3 service-worker fetches | E2E network mocking is flaky or impossible | Resolved in M1: `browserContext.route()` intercepts service-worker requests reliably; E2E mocks `api.github.com` and never calls the live API | M1 E2E suite passes offline, including repeated runs |
 | `activeTab` URL availability or lifecycle | Popup cannot identify the current issue/PR | Verify in real Chrome early; show actionable error; consider explicit URL input as an approved fallback | M0/M4 manual test on GitHub tabs and non-GitHub tabs |
 | Service worker termination and concurrent writers | Lost updates or inconsistent records | Stateless handlers, re-read before mutate, background serialized queue, per-entity keys | Unit tests for concurrent commands; manual/idle reload test; E2E parallel save |
 | Corrupt or incompatible stored data | Dashboard crash or data loss | Validate each record, skip without deleting, surface warnings, version metadata, block unsupported newer versions | Fixture tests with malformed records and unknown schema version |
 | Storage quota exceeded | Saves/notes fail | Bounded note length, small records, catch quota errors, clear UI error | Fake adapter tests for quota rejection; manual large-note check |
 | URL edge cases (PR tabs, trailing paths, query strings, case, fake hosts) | Wrong target saved or duplicate records | Pure parser with a broad table-driven test suite; canonical ids and URLs | Unit tests plus active-tab tests |
-| Tailwind/WXT/Vite version incompatibility | Build failures or missing styles | Pin stable compatible versions at M1, commit lockfile, follow official integration docs | `pnpm build`, load unpacked, visual smoke test |
+| Tailwind/WXT/Vite version incompatibility | Build failures or missing styles | Pin stable compatible versions at M1 (candidates and constraints in `docs/feasibility-report.md`), commit lockfile, follow official integration docs | `pnpm build`, load unpacked, visual smoke test |
+| Chrome 137+ removed `--load-extension` for branded builds | `pnpm dev` cannot auto-launch the installed Chrome; E2E cannot use system Chrome | Use Chrome for Testing/Chromium for dev and Playwright's bundled Chromium for E2E, or disable `webExt` and load unpacked manually; M0 confirmed unpacked loading still works via CDP | M1 dev-browser check; Playwright load test in M1 |
 | Monochrome accessibility | Status/actions indistinguishable or low contrast | Text-plus-shape badges, contrast checks, focus states, keyboard tests | Manual contrast/focus audit and keyboard E2E |
 | GitHub response shape drift | Mapping fails or shows wrong state | Narrow DTO guards, typed errors, preserve last known state, surface sync error | Fixture tests including malformed payloads |
 

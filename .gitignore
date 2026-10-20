@@ -1,0 +1,13 @@
+node_modules/
+.output/
+.wxt/
+stats.html
+stats-*.json
+*.zip
+.env
+.env.*
+web-ext.config.ts
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/

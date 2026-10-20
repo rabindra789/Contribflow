@@ -16,6 +16,8 @@ Status: proposed. Work begins only after approval. No application code, dependen
 
 Timeboxed, throwaway validation. Findings are recorded before building the product.
 
+Status: executed 2026-10-19 to 2026-10-20. Evidence and assumptions are recorded in `docs/feasibility-report.md`.
+
 ### Goals
 
 1. Confirm a current stable WXT + React + TypeScript + Tailwind CSS setup builds a Chrome MV3 extension.
@@ -30,6 +32,15 @@ Timeboxed, throwaway validation. Findings are recorded before building the produ
 - `activeTab` behavior is verified. If it is insufficient, explicit URL input is proposed as a product change rather than adding `tabs`.
 - Findings and version choices are added to the docs.
 
+### Results
+
+Recorded in `docs/feasibility-report.md`:
+
+- Verified with a throwaway CDP spike in Chrome 155: unpacked loading via the `Extensions` domain, `activeTab` URL/title in the popup (`null` on restricted pages), background messaging, service-worker restart on action, `chrome.storage.local` writes, and the 10 MiB quota.
+- Deferred to M1 because M0 prohibited installing dependencies: the WXT + React + TypeScript + Tailwind build, and Playwright extension loading plus service-worker fetch interception with bundled Chromium.
+- Candidate versions were checked against the npm registry; TypeScript stays `<6.1` until `typescript-eslint` supports 7.x, and jsdom stays `29.x` on Node 24.14.0.
+- Chrome 137+ removed `--load-extension` for branded builds, so M1 must choose the development browser strategy rather than relying on WXT auto-launching the installed Chrome.
+
 ## M1 - Foundation
 
 Depends on M0.
@@ -43,6 +54,8 @@ Depends on M0.
 - ESLint, Vitest, Playwright configuration, and `package.json` scripts.
 - Proposed directory structure from `docs/architecture.md`, with no empty placeholder modules.
 - `.gitignore`, lockfile, and updated command documentation.
+- Deferred M0 evidence checks: build with the pinned versions, and load the built extension with Playwright's bundled Chromium.
+- Development browser strategy documented: a Chrome for Testing/Chromium binary (the Playwright download can serve both dev and tests) or `webExt` disabled with manual unpacked loading.
 
 ### Acceptance
 
@@ -50,7 +63,21 @@ Depends on M0.
 - The unpacked build loads in Chrome without manifest errors.
 - Popup and dashboard open and render the monochrome shell.
 - The installed permission list matches the architecture document.
+- Playwright loads the built extension in its bundled Chromium; if service-worker request interception does not work, the documented fallback is adopted and recorded.
+- `docs/feasibility-report.md` is updated with the deferred M0 results.
 - No storage, GitHub, or feature logic is implemented yet.
+
+### Results
+
+Status: complete, awaiting review. Executed 2026-10-20.
+
+- Dependencies installed with pnpm 12.14.0 on Node 24.14.0; direct versions are pinned exactly in `package.json` and locked in `pnpm-lock.yaml`.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, and `pnpm zip` pass; the archive is written to `.output/contribflow-0.1.0-chrome.zip`.
+- The generated manifest contains only `storage`, `activeTab`, and `https://api.github.com/*`, with no content scripts; `popup.html` and `dashboard.html` are both present in the build.
+- Playwright loads the production build in bundled Chrome for Testing 156 (headless) and `browserContext.route()` intercepts service-worker `https://api.github.com/*` fetches, so the E2E suite runs deterministically without live API calls; 4 tests pass, and the interception test passed 3 consecutive repeat runs.
+- A branded Chrome 155 smoke test loaded `.output/chrome-mv3`, rendered the popup and dashboard with Tailwind styles applied, and confirmed the same manifest.
+- Dev browser strategy: `web-ext` is not installed; `pnpm dev` builds `.output/chrome-mv3-dev` and instructs the user to load it manually, as documented in `README.md`.
+- Full evidence and version deviations: `docs/feasibility-report.md`, "M1 addendum".
 
 ## M2 - Domain and persistence
 
