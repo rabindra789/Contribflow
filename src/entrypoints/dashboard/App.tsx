@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { AppShell } from '@/components/AppShell';
+import { secondaryButtonClass } from '@/components/dashboard/button-classes';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { IssueCard } from '@/components/dashboard/IssueCard';
 import { PullRequestCard } from '@/components/dashboard/PullRequestCard';
@@ -8,6 +9,7 @@ import type { StorageWarning } from '../../storage/warnings';
 import {
   useDashboardWorkflow,
   type DashboardNotice,
+  type DashboardPendingAction,
 } from '../../hooks/useDashboardWorkflow';
 import {
   DEFAULT_DASHBOARD_FILTERS,
@@ -19,9 +21,6 @@ import {
   type DashboardFilters as DashboardFiltersValue,
 } from '../../lib/dashboard-view';
 import type { BackgroundClient } from '../../messaging/background-client';
-
-const secondaryButtonClass =
-  'rounded border border-line bg-canvas px-3 py-1.5 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-50';
 
 function warningText(warning: StorageWarning): string {
   if (warning.kind === 'orphan-note') {
@@ -105,15 +104,22 @@ function StorageWarnings({ warnings }: { warnings: StorageWarning[] }) {
 
 function DashboardReady({
   snapshot,
+  pending,
   refreshing,
   notice,
   onRefresh,
+  onRemoveIssue,
+  onUntrackPullRequest,
 }: {
   snapshot: StorageSnapshot;
+  pending: DashboardPendingAction | null;
   refreshing: boolean;
   notice: DashboardNotice | null;
   onRefresh: () => void;
+  onRemoveIssue: (issueId: string) => Promise<boolean>;
+  onUntrackPullRequest: (pullRequestId: string) => Promise<boolean>;
 }) {
+  const actionsDisabled = pending !== null || refreshing;
   const [filters, setFilters] = useState<DashboardFiltersValue>(
     DEFAULT_DASHBOARD_FILTERS,
   );
@@ -157,7 +163,7 @@ function DashboardReady({
           <button
             type="button"
             className={secondaryButtonClass}
-            disabled={refreshing}
+            disabled={actionsDisabled}
             onClick={onRefresh}
           >
             {refreshing ? 'Refreshing...' : 'Refresh collection'}
@@ -178,7 +184,7 @@ function DashboardReady({
         <button
           type="button"
           className={secondaryButtonClass}
-          disabled={refreshing}
+          disabled={actionsDisabled}
           onClick={onRefresh}
         >
           {refreshing ? 'Refreshing...' : 'Refresh collection'}
@@ -243,7 +249,16 @@ function DashboardReady({
               ) : (
                 <div className="mt-2 grid gap-3">
                   {filteredIssues.map((issue) => (
-                    <IssueCard key={issue.id} issue={issue} />
+                    <IssueCard
+                      key={issue.id}
+                      issue={issue}
+                      actionsDisabled={actionsDisabled}
+                      pending={
+                        pending?.kind === 'remove-issue' &&
+                        pending.id === issue.id
+                      }
+                      onRemove={() => onRemoveIssue(issue.id)}
+                    />
                   ))}
                 </div>
               )}
@@ -280,6 +295,12 @@ function DashboardReady({
                     <PullRequestCard
                       key={pullRequest.id}
                       pullRequest={pullRequest}
+                      actionsDisabled={actionsDisabled}
+                      pending={
+                        pending?.kind === 'untrack-pull-request' &&
+                        pending.id === pullRequest.id
+                      }
+                      onUntrack={() => onUntrackPullRequest(pullRequest.id)}
                     />
                   ))}
                 </div>
@@ -333,11 +354,14 @@ export function DashboardApp({ client }: DashboardAppProps) {
       {workflow.state.status === 'ready' ? (
         <DashboardReady
           snapshot={workflow.state.snapshot}
+          pending={workflow.pending}
           refreshing={workflow.refreshingCollection}
           notice={workflow.notice}
           onRefresh={() => {
             void workflow.refreshCollection();
           }}
+          onRemoveIssue={workflow.removeIssue}
+          onUntrackPullRequest={workflow.untrackPullRequest}
         />
       ) : null}
     </AppShell>

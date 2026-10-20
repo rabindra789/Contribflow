@@ -388,6 +388,220 @@ describe('dashboard', () => {
     expect(state).toHaveValue('all');
   });
 
+  it('removes a saved issue after confirmation and updates the view', async () => {
+    const removeIssue = vi
+      .fn<BackgroundClient['removeIssue']>()
+      .mockResolvedValue({ issueId: issue.id });
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          removeIssue,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Remove Microsoft/TypeScript#12345 and its note',
+      }),
+    );
+    expect(screen.getByText('Remove this issue and its note?')).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Confirm removing Microsoft/TypeScript#12345',
+      }),
+    );
+
+    expect(
+      await screen.findByText('The issue and any private note were removed.'),
+    ).toBeVisible();
+    expect(removeIssue).toHaveBeenCalledWith(issue.id);
+    expect(
+      screen.queryByRole('heading', { name: issueTitle }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('group', { name: 'Saved issues: 1' }),
+    ).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Private notes: 0' })).toBeVisible();
+  });
+
+  it('cancels issue removal without writing', async () => {
+    const removeIssue = vi.fn<BackgroundClient['removeIssue']>();
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          removeIssue,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Remove Microsoft/TypeScript#12345 and its note',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Cancel removing Microsoft/TypeScript#12345',
+      }),
+    );
+
+    expect(removeIssue).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+  });
+
+  it('keeps the issue and confirmation visible when removal fails', async () => {
+    const removeIssue = vi
+      .fn<BackgroundClient['removeIssue']>()
+      .mockRejectedValue(
+        new BackgroundClientError(
+          'command-failed',
+          'ContribFlow storage is unavailable.',
+        ),
+      );
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          removeIssue,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Remove Microsoft/TypeScript#12345 and its note',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Confirm removing Microsoft/TypeScript#12345',
+      }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'ContribFlow storage is unavailable.',
+    );
+    expect(
+      screen.getByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', {
+        name: 'Confirm removing Microsoft/TypeScript#12345',
+      }),
+    ).toBeEnabled();
+  });
+
+  it('prevents duplicate issue removals while the request is pending', async () => {
+    const pendingRemoval = deferred<{ issueId: string }>();
+    const removeIssue = vi
+      .fn<BackgroundClient['removeIssue']>()
+      .mockReturnValue(pendingRemoval.promise);
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          removeIssue,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: issueTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Remove Microsoft/TypeScript#12345 and its note',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Confirm removing Microsoft/TypeScript#12345',
+      }),
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Removing issue...' }),
+    ).toBeDisabled();
+    expect(removeIssue).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingRemoval.resolve({ issueId: issue.id });
+      await pendingRemoval.promise;
+    });
+
+    expect(
+      await screen.findByText('The issue and any private note were removed.'),
+    ).toBeVisible();
+    expect(removeIssue).toHaveBeenCalledTimes(1);
+  });
+
+  it('untracks a pull request after confirmation and updates the view', async () => {
+    const removePullRequest = vi
+      .fn<BackgroundClient['removePullRequest']>()
+      .mockResolvedValue({ pullRequestId: pullRequest.id });
+    render(
+      <DashboardApp
+        client={createClient({
+          getSnapshot: vi
+            .fn<BackgroundClient['getSnapshot']>()
+            .mockResolvedValue(populatedSnapshot),
+          removePullRequest,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: pullRequestTitle }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Untrack Microsoft/TypeScript#54321',
+      }),
+    );
+    expect(screen.getByText('Untrack this pull request?')).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Confirm untracking Microsoft/TypeScript#54321',
+      }),
+    );
+
+    expect(
+      await screen.findByText('The pull request was untracked.'),
+    ).toBeVisible();
+    expect(removePullRequest).toHaveBeenCalledWith(pullRequest.id);
+    expect(
+      screen.queryByRole('heading', { name: pullRequestTitle }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('group', { name: 'Tracked pull requests: 0' }),
+    ).toBeVisible();
+  });
+
   it('shows a no-match state and clears filters', async () => {
     render(
       <DashboardApp

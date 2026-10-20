@@ -1,14 +1,30 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import type { TrackedPullRequest } from '../../domain/models';
+import { primaryButtonClass, quietButtonClass, secondaryButtonClass } from './button-classes';
 import { StateBadge, SyncDetails } from './RecordBadges';
+
+interface PullRequestCardProps {
+  pullRequest: TrackedPullRequest;
+  actionsDisabled: boolean;
+  pending: boolean;
+  onUntrack(): Promise<boolean>;
+}
 
 export function PullRequestCard({
   pullRequest,
-}: {
-  pullRequest: TrackedPullRequest;
-}) {
+  actionsDisabled,
+  pending,
+  onUntrack,
+}: PullRequestCardProps) {
   const headingId = useId();
+  const [confirming, setConfirming] = useState(false);
   const reference = `${pullRequest.owner}/${pullRequest.repo}#${pullRequest.number}`;
+
+  async function confirmUntrack(): Promise<void> {
+    if (await onUntrack()) {
+      setConfirming(false);
+    }
+  }
 
   return (
     <article
@@ -33,7 +49,7 @@ export function PullRequestCard({
         lastSyncError={pullRequest.lastSyncError}
       />
 
-      <div className="mt-3 flex justify-end">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
         <a
           href={pullRequest.url}
           target="_blank"
@@ -43,6 +59,50 @@ export function PullRequestCard({
         >
           View on GitHub
         </a>
+
+        {confirming ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <span className="text-xs text-muted">
+              Untrack this pull request?
+            </span>
+            <button
+              type="button"
+              className={secondaryButtonClass}
+              disabled={actionsDisabled}
+              aria-label={`Cancel untracking ${reference}`}
+              onClick={() => {
+                setConfirming(false);
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={primaryButtonClass}
+              disabled={actionsDisabled}
+              aria-label={
+                pending ? 'Untracking pull request...' : `Confirm untracking ${reference}`
+              }
+              onClick={() => {
+                void confirmUntrack();
+              }}
+            >
+              {pending ? 'Untracking...' : 'Untrack'}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className={quietButtonClass}
+            disabled={actionsDisabled}
+            aria-label={`Untrack ${reference}`}
+            onClick={() => {
+              setConfirming(true);
+            }}
+          >
+            Untrack
+          </button>
+        )}
       </div>
     </article>
   );
