@@ -1,6 +1,6 @@
 # ContribFlow Architecture
 
-Status: M1 foundation, M2 domain/persistence, and M3 GitHub client/background commands are implemented. The popup and dashboard remain shells; product workflows begin in M4-M5.
+Status: M1 foundation, M2 domain/persistence, M3 GitHub client/background commands, and the M4.1 popup target/action workflow are implemented. The dashboard remains a shell; M4.2 (dashboard link/counts) and M5+ are not started.
 
 ## Goals
 
@@ -50,15 +50,16 @@ The GitHub website is used only as the source of the active tab URL. No host per
 | --- | --- | --- |
 | `entrypoints` | Popup, dashboard, background wiring | All application layers |
 | `components` | Presentational React UI and design-system primitives | `domain` types, `lib`; never storage, GitHub, or Chrome APIs |
-| `hooks` | React data/state hooks; load snapshots, subscribe to changes, send messages | `storage` read API, `messaging`, `domain` |
-| `messaging` | Discriminated request/response contracts, runtime validation, and result envelopes | `domain` types and storage read-contract types |
+| `hooks` | React workflow state; load snapshots through messaging and manage popup actions | `messaging`, `lib`, `domain`, storage read-contract types |
+| `lib` | Active-tab detection and pure UI target resolution | `domain`, storage read-contract types; WXT browser API only for tab queries |
+| `messaging` | Discriminated request/response contracts, runtime validation, result envelopes, and the validated background client | `domain`, storage read-contract types and key helpers, WXT runtime API |
 | `domain` | Types, validators, URL parsing, key rules, status derivation, sorting | TypeScript standard library only |
 | `storage` | Repository contract, Chrome adapter, key layout, migrations | `domain`; Chrome/WXT APIs only in the adapter |
 | `github` | REST client, response mapping, error taxonomy; injected `fetch` | `domain` types |
 
 Rules:
 
-- UI never writes to storage directly and never calls GitHub. It reads through the repository and listens for changes.
+- UI never writes to storage directly and never calls GitHub. It reads through the repository where appropriate or through `GET_SNAPSHOT`, and long-lived views listen for storage changes.
 - All mutations and all GitHub requests are handled by the background service worker.
 - Only `src/storage/chrome-storage.ts` touches `chrome.storage`; only `src/github/client.ts` calls `fetch`.
 - `src/domain` stays pure and fully unit-testable without browser APIs.
@@ -107,9 +108,13 @@ Rules:
 │  │  ├─ errors.ts
 │  │  └─ rate-limit.ts
 │  ├─ messaging/
-│  │  └─ contracts.ts
+│  │  ├─ contracts.ts
+│  │  └─ background-client.ts
 │  ├─ hooks/
+│  │  └─ usePopupWorkflow.ts
 │  ├─ lib/
+│  │  ├─ active-target.ts
+│  │  └─ popup-target.ts
 │  └─ styles/
 │     └─ main.css
 ├─ e2e/
@@ -124,6 +129,15 @@ Rules:
 Unit tests are colocated as `*.test.ts` / `*.test.tsx`. Playwright tests live in `e2e/`.
 
 ## Core flows
+
+### Popup target workflow
+
+1. On open, the popup queries the active tab in the current window, parses its final URL with `parseGitHubUrl`, and classifies `/issues/` and `/pull/` paths separately. It never upgrades an issue URL to a pull request locally; the GitHub response remains authoritative.
+2. Unsupported, restricted, or missing tab URLs produce actionable empty states without reading storage.
+3. For a supported target, the popup requests `GET_SNAPSHOT` through the validated background client and matches the target's canonical id against saved issues and tracked pull requests.
+4. Save/track and remove/untrack actions send the existing typed commands; success updates the local view immediately, while failures keep the prior state and show a bounded message.
+5. A saved reference whose metadata sync failed shows `lastSyncError` and offers `REFRESH_ISSUE` or `REFRESH_PULL_REQUEST` as an explicit retry. The popup never writes storage or calls GitHub directly.
+6. The background client validates the response envelope, command result, storage records, notes, target ids, and warnings before the hook can render them.
 
 ### Save an issue
 

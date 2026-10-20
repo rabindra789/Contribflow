@@ -2,7 +2,7 @@
 
 Status: implemented in M2 for MVP schema version 1. These definitions are the contract for storage, messaging, and tests.
 
-Implementation lives in `src/domain/models.ts`, `validation.ts`, `github-url.ts`, and `pull-request-state.ts`, plus `src/storage/keys.ts`, `repository.ts`, `memory-storage.ts`, `chrome-storage.ts`, and `migrations.ts`. Background commands in `src/background/` and message contracts in `src/messaging/` enforce these rules at the runtime boundary. Unit tests are colocated.
+Implementation lives in `src/domain/models.ts`, `validation.ts`, `github-url.ts`, and `pull-request-state.ts`, plus `src/storage/keys.ts`, `repository.ts`, `memory-storage.ts`, `chrome-storage.ts`, and `migrations.ts`. Background commands in `src/background/`, message contracts in `src/messaging/contracts.ts`, and the UI-facing `src/messaging/background-client.ts` enforce these rules at the runtime boundary. The popup classifies the active tab through `src/lib/active-target.ts` and resolves savedness by canonical id. Unit tests are colocated.
 
 ## Conventions
 

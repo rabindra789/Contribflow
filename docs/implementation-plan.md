@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Status: M0-M3 complete and under review. M4 (popup workflow) has not started.
+Status: M0-M3 complete and under review. M4.1 (popup target/action workflow) is complete and under review. M4.2 (dashboard link/counts) and M5+ have not started.
 
 ## Ground rules
 
@@ -171,6 +171,19 @@ Depends on M3.
 - Non-GitHub, `chrome://`, and unsupported GitHub pages show actionable empty states.
 - API failure still yields a saved reference and a visible warning.
 - Permission and network inspection confirms only `api.github.com` is contacted, only after user action.
+
+### M4.1 - Popup target/action workflow
+
+Status: complete, awaiting review. Executed 2026-10-20. This is the approved subset of M4 that excludes the dashboard link and saved counts.
+
+- Implemented `src/lib/active-target.ts` and `popup-target.ts`: query the active tab in the current window, parse GitHub issues and pull requests separately, return actionable missing/unsupported states, and resolve savedness by canonical id against the snapshot.
+- Implemented `src/messaging/background-client.ts`: typed methods for snapshot, save/refresh/remove issue, and track/refresh/remove pull request. It validates result envelopes, errors, records, notes, warnings, and removal ids; messaging rejection and malformed responses produce safe typed errors. It never logs message content.
+- Implemented `src/hooks/usePopupWorkflow.ts` and the popup UI in `src/entrypoints/popup/App.tsx`: loading, unsupported/missing, snapshot error/retry, unsaved/saved issue, untracked/tracked PR, pending, success, warning, and error states. Saved references with failed metadata show the bounded sync error and a retry action. Duplicate submissions are blocked synchronously and updates are guarded after unmount.
+- Save and track update `GET_SNAPSHOT` data locally; remove and untrack also drop the local record (and the note for a removed issue). No storage or GitHub access exists in UI code, and no permissions or dependencies changed.
+- Added 45 deterministic unit/component tests for target resolution, response validation, and popup states, including malformed payloads, command failures, metadata retry, duplicate clicks, and React Strict Mode. The full suite is 19 files / 468 tests.
+- Added deterministic Playwright coverage for unsupported pages, save/reload/remove, track/untrack, and metadata failure/retry. Active-tab detection is stubbed before the popup loads; API requests are routed. E2E is 8/8 with no live GitHub calls.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm zip`, and `pnpm test:e2e` pass. Production build is 282.70 kB; zip is 87.68 kB. Manifest permissions remain `storage`, `activeTab`, and `https://api.github.com/*`.
+- Not yet implemented, by design: dashboard link and basic saved counts (M4.2), dashboard data binding/note editor (M5), sorting/filtering, and release hardening (M6).
 
 ## M5 - Dashboard
 
