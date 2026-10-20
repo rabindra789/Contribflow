@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Status: proposed. Work begins only after approval. No application code, dependencies, or tooling have been added.
+Status: M0-M2 complete and under review. M3 (GitHub client and background commands) has not started.
 
 ## Ground rules
 
@@ -99,6 +99,19 @@ Depends on M1.
 - Corrupt records remain in storage, are skipped, and produce warnings.
 - Missing metadata, newer schema versions, migration failures, and storage quota errors are surfaced with typed errors.
 - `src/domain` imports no React, WXT, or Chrome APIs; only the Chrome adapter touches `chrome.storage`.
+
+### Results
+
+Status: complete, awaiting review. Executed 2026-10-20.
+
+- Implemented `src/domain/models.ts`, `validation.ts`, `github-url.ts`, and `pull-request-state.ts` with hand-written validation and canonical id/URL helpers; no new dependencies.
+- Implemented `src/storage/keys.ts`, `repository.ts`, `memory-storage.ts`, `chrome-storage.ts`, `migrations.ts`, and `warnings.ts`. The Chrome adapter is the only module importing `wxt/browser`.
+- The URL matrix is documented in `docs/data-models.md`; 71 parser cases cover issue/PR forms, tabs, query/fragment, trailing paths, case, hosts, credentials, ports, reserved paths, and malformed numbers.
+- Repository tests cover round trips, duplicate issue saves, PR refreshes preserving `addedAt`, note create/update preserving `createdAt`, missing-issue rejection, one-call removal cascades, unrelated-key preservation, warnings, metadata failures, quota/read/remove failures, subscriptions, and serialized concurrent writes.
+- Migration tests use stored v1 fixture payloads and cover chained step order, single-write application, idempotence, missing steps, thrown/non-record results, invalid registries, newer/corrupt/missing metadata, and read/write failures. v1 has an empty registry.
+- Full unit suite: 9 files, 301 tests passing. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm zip`, and `pnpm test:e2e` (4 tests) pass.
+- The manifest is unchanged: `storage`, `activeTab`, and `https://api.github.com/*` only. Production build is 229.88 kB; zip is 72.89 kB.
+- Not yet implemented, by design: GitHub API client, typed background commands/messaging, storage-to-UI wiring, and functional popup/dashboard flows. The migration runner is not yet invoked because no command handling exists; that wiring belongs to M3.
 
 ## M3 - GitHub client and background commands
 

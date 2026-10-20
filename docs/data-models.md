@@ -1,6 +1,8 @@
 # Initial Data Models
 
-Status: proposed for MVP schema version 1. These definitions are the contract for storage, messaging, and tests.
+Status: implemented in M2 for MVP schema version 1. These definitions are the contract for storage, messaging, and tests.
+
+Implementation lives in `src/domain/models.ts`, `validation.ts`, `github-url.ts`, and `pull-request-state.ts`, plus `src/storage/keys.ts`, `repository.ts`, `memory-storage.ts`, `chrome-storage.ts`, and `migrations.ts`. Unit tests are colocated.
 
 ## Conventions
 
@@ -125,21 +127,43 @@ Anything else is an invalid API response.
 
 ## URL parsing
 
-`parseGitHubUrl(input: string)` accepts only:
+`parseGitHubUrl(input: unknown)` returns `{ ok: true, target }` or `{ ok: false, reason, message }`. The accepted matrix is:
 
-- `https://github.com/<owner>/<repo>/issues/<number>`
-- `https://github.com/<owner>/<repo>/pull/<number>`
+| Input shape | Result |
+| --- | --- |
+| `https://github.com/<owner>/<repo>/issues/<number>` | Issue target |
+| `https://github.com/<owner>/<repo>/pull/<number>` | Pull request target |
+| Either form with trailing `/` or `///` | Accepted; slashes removed |
+| Either form with `?query`, `#fragment`, or both | Accepted; query and fragment removed |
+| Issue form with extra trailing path segments (for example `/issues/42/anything`) | Accepted; extra segments removed |
+| Pull request form with PR tab subpaths (for example `/files`, `/commits/<sha>`) | Accepted; extra segments removed |
+| Surrounding whitespace, or a host written as `GitHub.COM` | Accepted; trimmed and normalized |
+| Owner with allowed hyphens; repo with allowed hyphens, underscores, or dots | Accepted within the syntax rules below |
+| Number `1` through `2147483647` with no leading zero | Accepted |
+
+Rejected inputs (with the parser's `reason`):
+
+| Input | Reason |
+| --- | --- |
+| Empty, whitespace-only, or unparseable string; non-string values | `invalid-url` |
+| `http://` or any non-HTTPS scheme | `unsupported-scheme` |
+| `gitlab.com`, `www.github.com`, `api.github.com`, `gist.github.com`, subdomains, or suffix tricks such as `github.com.evil.com` | `unsupported-host` |
+| URLs containing a username or password | `credentials-not-allowed` |
+| An explicit non-default port such as `github.com:8443` | `port-not-allowed` |
+| Missing, empty, or doubled path segments (for example `/issues/1//files`) | `invalid-path` |
+| `/pulls/<number>`, `/tree/...`, or path kinds with different casing such as `/Issues/1` | `unsupported-target-kind` |
+| `/issues/new` or `/pull/new` | `reserved-path` |
+| Number `0`, leading-zero numbers, values above `2147483647`, decimals, exponents, hex, negatives, non-numeric or percent-encoded text | `invalid-number` |
+| Owner or repo that violates the syntax rules, including dot segments normalized by `URL` | `invalid-owner` / `invalid-repo` |
 
 Rules:
 
 - Host must be exactly `github.com`; no credentials, ports, or alternate hosts.
 - Scheme must be `https`.
-- Paths may have trailing slashes, query strings, or fragments; these are removed.
-- Extra trailing path segments are accepted and canonicalized away (for example `/pull/123/files`) so PR tabs work.
-- Reserved paths such as `/issues/new` and non-numeric numbers are rejected.
+- Query strings and fragments are ignored. Trailing path segments after the number are ignored, but an empty segment in the path is invalid.
 - Owner and repo are syntax-checked before use.
 - The result includes `kind`, `owner`, `repo`, `number`, `url`, and canonical `id`.
-- GitHub redirects `/issues/<number>` to `/pull/<number>` when that number belongs to a pull request (observed in M0: `octocat/Hello-World/issues/1` -> `/pull/1`). The final, post-redirect tab URL decides whether the target is an issue or a pull request.
+- An `/issues/<number>` URL is always classified as an issue. GitHub redirects it to `/pull/<number>` when the number belongs to a pull request (observed in M0: `octocat/Hello-World/issues/1` -> `/pull/1`). The final, post-redirect tab URL decides the kind.
 
 Parsing is pure and table-tested. The active tab URL is read only after the user invokes the extension; no DOM inspection is used. The popup parses the tab's final URL, so a redirected target is classified by the page actually shown.
 
@@ -161,7 +185,15 @@ Rationale:
 - The namespace carries the schema version, so future incompatible layouts can be migrated explicitly.
 - The key suffix is verified against the record id; mismatches are treated as invalid records.
 
-If the meta key is missing and no data keys exist, the dataset is empty schema v1. If data exists without valid meta, load fails with a visible corruption error rather than guessing and overwriting. If `schemaVersion` is newer than supported, reads render an "update the extension" error and writes are blocked.
+If the meta key is missing and no data keys exist, the dataset is empty schema v1. If data exists without valid meta, load fails with a visible corruption error rather than guessing and overwriting. If `schemaVersion` is newer than supported, reads render an "update the extension" error and writes are blocked. An older metadata version blocks reads with `migration-failed` and writes with `schema-migration-required`; migrations are never applied implicitly by a read.
+
+Load treats these conditions as warnings while keeping the underlying keys in storage:
+
+- A `contribflow.*` key that cannot be parsed, uses a version other than the supported one, or does not match its record id.
+- A valid record that fails field validation.
+- A valid note whose issue is missing (`orphan-note`).
+
+Keys outside the `contribflow.` namespace are ignored and preserved.
 
 ## Repository contract
 
@@ -205,19 +237,35 @@ type LoadSnapshotResult =
     };
 ```
 
-The in-memory adapter used by tests implements the same interface. The Chrome adapter is the only module that touches `chrome.storage`.
+`loadSnapshot` never throws for storage, metadata, or migration errors; it returns the typed result above. Subscription callbacks receive only changed keys that parse as ContribFlow keys.
+
+Write commands reject with the exported `StorageRepositoryError`, whose `kind` is one of:
+
+| Kind | Meaning |
+| --- | --- |
+| `invalid-record` | The input record fails validation; nothing is written |
+| `corrupt-record` | An existing record for the same key is invalid; it is left untouched |
+| `corrupt-metadata` | Meta is missing alongside data, or is invalid |
+| `unsupported-schema` | Stored metadata is newer than the extension supports |
+| `schema-migration-required` | Stored metadata is older and must be migrated first |
+| `missing-issue` | A note write targets an issue that is not saved |
+| `quota-exceeded` | Chrome rejected the write because the storage quota was exceeded |
+| `unavailable` | The storage adapter failed for another reason |
+
+The repository is created with `createStorageRepository(port)`. `createMemoryStorageHarness()` / `createMemoryStorageRepository()` provide the in-memory adapter used by tests, and `createChromeStorageRepository()` provides the production adapter. The Chrome adapter is the only module that touches `chrome.storage` or WXT browser APIs.
 
 ## Lifecycle rules
 
-- Save issue: idempotent by id. An existing issue is returned unchanged; notes are never overwritten.
-- Save PR: idempotent by id; an existing record is refreshed rather than duplicated.
+- Save issue: insert-only and idempotent by id. A valid existing issue is left unchanged; notes are never overwritten. An invalid existing record blocks the save with `corrupt-record`.
+- Save PR: upsert by id. A refresh updates metadata while preserving `addedAt`; identical upserts do not write. An invalid existing record blocks the write.
 - Refresh: replaces the metadata fields only; local timestamps (`savedAt` / `addedAt`) and notes are preserved.
-- Remove issue: removes the issue and note keys in one `remove` call.
-- Save note: requires an existing issue; updates `updatedAt` and preserves `createdAt`.
+- Remove issue: removes the issue and note keys in one `remove` call, and also removes an orphan note for that id. Missing keys are a no-op.
+- Save note: requires a valid existing issue; upserts the single note, updates `updatedAt`, and preserves the stored `createdAt`.
 - Delete note: independent action; empty note bodies are invalid rather than implicitly deleting.
 - Orphan notes (missing issue) are kept, reported as warnings, and not displayed.
 - Invalid records are kept, reported, and excluded from the UI.
-- The background serializes mutations and re-reads current state before read-modify-write commands.
+- The first write to an empty store writes the meta key and the record in one `set` call. Every mutation validates meta before writing, including no-op duplicates.
+- One repository instance serializes mutations through an in-process promise queue and re-reads storage inside the queued command. The queue is not persisted and does not provide a cross-context or multi-tab transaction. Per-entity keys avoid whole-dataset lost updates, and a single background worker is the only writer.
 
 ## Limits
 
@@ -270,9 +318,12 @@ The in-memory adapter used by tests implements the same interface. The Chrome ad
 
 ## Migration policy
 
-- v1 has no migrations. The migration runner and version check are still implemented at M2 so schema changes are possible.
-- Migrations run in the background before command handling and are idempotent.
-- A migration failure leaves original data untouched, blocks writes, and reports a visible error.
+- v1 has no migrations; the registry is empty. The runner and version checks are implemented at M2 so schema changes are possible.
+- `runMigrations(port, { migrations, supportedVersion })` reads the store, follows a chain from the stored version, applies each step to an in-memory copy, then writes only the changed keys plus new metadata in one `set` call.
+- The runner is idempotent: a store already at the supported version performs no write. An empty store without data keys is treated as current.
+- Missing steps, duplicate or non-advancing definitions, steps beyond the supported version, malformed metadata, a newer stored version, and thrown migration errors all return typed failures without writing. A failed later step leaves earlier in-memory changes unapplied.
+- Migrations cannot delete keys through this interface; unrelated data and keys outside the namespace are preserved.
+- Migrations run in the background before command handling once command handling exists (M3). Ordinary reads never migrate.
 - Every migration is tested against stored fixture payloads.
 - Unknown or newer schema versions are never downgraded, rewritten, or cleared.
 - Adding fields may be backward-compatible within v1 only if readers tolerate missing values; any change to required fields or key layout requires a new schema version.

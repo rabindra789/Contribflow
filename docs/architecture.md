@@ -1,6 +1,6 @@
 # ContribFlow Architecture
 
-Status: proposed. Awaiting approval before implementation. No application code exists yet.
+Status: M1 foundation and M2 domain/persistence are implemented. The popup and dashboard remain shells; repository wiring and product flows begin in M3-M5.
 
 ## Goals
 
@@ -64,7 +64,7 @@ Rules:
 - `src/domain` stays pure and fully unit-testable without browser APIs.
 - The background serializes mutations through an in-process queue. The queue is not the source of truth; every command re-reads storage.
 
-## Proposed directory structure
+## Directory structure
 
 ```text
 .
@@ -95,6 +95,7 @@ Rules:
 │  ├─ storage/
 │  │  ├─ keys.ts
 │  │  ├─ repository.ts
+│  │  ├─ memory-storage.ts
 │  │  ├─ chrome-storage.ts
 │  │  ├─ migrations.ts
 │  │  └─ warnings.ts
@@ -162,10 +163,13 @@ Same flow, using the pull request endpoint and a `TrackedPullRequest` record. Pr
 - Storage area: `chrome.storage.local` only. `storage.sync` is not used.
 - Layout: one versioned storage key per entity, plus a metadata key. This avoids whole-document lost updates between the popup and dashboard.
 - Keys and record rules: see `docs/data-models.md`.
-- Reads validate every record. Invalid data is skipped, never deleted automatically.
-- Writes are centralized in the background service worker and serialized. No cross-context write races.
-- Schema version is stored explicitly. Migrations run in the background; unsupported newer versions block writes and show an actionable error instead of destroying data.
-- Storage quota failures are reported; notes are length-limited.
+- Reads validate every record independently. Invalid data is skipped, never deleted automatically, and reported through snapshot warnings.
+- `createStorageRepository(port)` implements the contract over a `StoragePort`. The Chrome adapter is the only module touching `chrome.storage`/`wxt/browser`; the in-memory adapter drives unit tests.
+- Writes are centralized in the background service worker. A repository instance serializes commands through an in-process promise queue, and each command re-reads storage inside the queue. The first write stores metadata and the record in the same `set` call.
+- The queue only orders work inside one background worker. `chrome.storage.local` does not provide multi-context transactions, so the design relies on a single writer plus per-entity keys rather than claiming cross-tab atomicity.
+- Duplicate issue saves are no-ops, PR upserts preserve `addedAt`, note upserts preserve `createdAt`, and removing an issue removes its note in one storage call.
+- Schema version is stored explicitly. `runMigrations` computes a chain in memory and writes changes plus metadata once; failures write nothing. Reads never migrate implicitly, and unsupported newer versions block writes and show an actionable error instead of destroying data.
+- Storage quota failures are mapped to a typed error; notes are length-limited.
 
 ## GitHub integration
 
@@ -235,7 +239,7 @@ Playwright tests must not depend on the live GitHub API. Playwright loads extens
 | Anonymous API limit (60 requests/hour/IP) and private repos | Refresh/save metadata fails | Fetch only on explicit actions; cache; allow saving without metadata; show reset time; no retries or polling | Fake-fetch unit tests for 403/429; E2E mocked rate-limit state; manual check of message and reset display |
 | Playwright cannot intercept MV3 service-worker fetches | E2E network mocking is flaky or impossible | Resolved in M1: `browserContext.route()` intercepts service-worker requests reliably; E2E mocks `api.github.com` and never calls the live API | M1 E2E suite passes offline, including repeated runs |
 | `activeTab` URL availability or lifecycle | Popup cannot identify the current issue/PR | Verify in real Chrome early; show actionable error; consider explicit URL input as an approved fallback | M0/M4 manual test on GitHub tabs and non-GitHub tabs |
-| Service worker termination and concurrent writers | Lost updates or inconsistent records | Stateless handlers, re-read before mutate, background serialized queue, per-entity keys | Unit tests for concurrent commands; manual/idle reload test; E2E parallel save |
+| Service worker termination and concurrent writers | Lost updates or inconsistent records | Stateless handlers, re-read before mutate, background serialized queue, per-entity keys; no multi-context transaction claim | Repository concurrency tests (serialized writes, queued note/remove ordering, last-write-wins); manual/idle reload test; E2E parallel save |
 | Corrupt or incompatible stored data | Dashboard crash or data loss | Validate each record, skip without deleting, surface warnings, version metadata, block unsupported newer versions | Fixture tests with malformed records and unknown schema version |
 | Storage quota exceeded | Saves/notes fail | Bounded note length, small records, catch quota errors, clear UI error | Fake adapter tests for quota rejection; manual large-note check |
 | URL edge cases (PR tabs, trailing paths, query strings, case, fake hosts) | Wrong target saved or duplicate records | Pure parser with a broad table-driven test suite; canonical ids and URLs | Unit tests plus active-tab tests |
