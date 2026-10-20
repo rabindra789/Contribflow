@@ -64,7 +64,7 @@ function hasDisallowedControlChars(value: string): boolean {
   return false;
 }
 
-function isTitle(value: unknown): value is string {
+export function isValidTitle(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value.length >= 1 &&
@@ -82,7 +82,7 @@ function isSyncError(value: unknown): value is string {
   );
 }
 
-function isNoteBody(value: unknown): value is string {
+export function isValidNoteBody(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value.length >= 1 &&
@@ -178,7 +178,7 @@ export function parseSavedIssue(storageKey: string, value: unknown): ValidationR
   }
 
   const title = value.title;
-  if (title !== null && !isTitle(title)) {
+  if (title !== null && !isValidTitle(title)) {
     return fail(`title must be null or 1-${MAX_TITLE_LENGTH} characters without control characters`);
   }
 
@@ -253,7 +253,7 @@ export function parseTrackedPullRequest(
   }
 
   const title = value.title;
-  if (title !== null && !isTitle(title)) {
+  if (title !== null && !isValidTitle(title)) {
     return fail(`title must be null or 1-${MAX_TITLE_LENGTH} characters without control characters`);
   }
 
@@ -322,7 +322,7 @@ export function parseIssueNote(value: unknown): ValidationResult<IssueNote> {
   }
 
   const body = value.body;
-  if (typeof body !== 'string' || !isNoteBody(body)) {
+  if (typeof body !== 'string' || !isValidNoteBody(body)) {
     return fail(`body must contain 1-${MAX_NOTE_BODY_LENGTH} UTF-16 code units after trimming`);
   }
 
