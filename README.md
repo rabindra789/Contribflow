@@ -4,10 +4,6 @@
 
 ContribFlow is a local-first Chrome (Manifest V3) extension for individual GitHub contributors. It saves GitHub issues, keeps one private note per saved issue, tracks pull requests, and shows everything in a local dashboard.
 
-The MVP is local: no account, no backend, no analytics, and no stored GitHub credentials.
-
-Current status: milestones M1 (foundation), M2 (domain and persistence), M3 (GitHub client and background commands), M4.1 (popup target/action workflow), M4.2 (dashboard workspace), and M5 (dashboard) are implemented. The popup detects supported GitHub issues and pull requests, saves issues, tracks pull requests, removes/untracks them, retries metadata, and links to the dashboard with saved counts. The dashboard loads through the background service worker, refreshes on local storage changes, supports issue removal, PR untracking/refresh, issue refresh, private note editing, and orphan-note warnings. All automated tests pass. Manual verification checks (keyboard, contrast, layout, browser restart, real Chrome smoke test) are pending. Release hardening (M6) remains. See `docs/implementation-plan.md`.
-
 ## Install without Chrome Web Store
 
 ContribFlow is not yet on the Chrome Web Store. You can install it directly from GitHub:
