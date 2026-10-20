@@ -89,3 +89,11 @@ docs/             architecture, data models, implementation plan, feasibility re
 ```
 
 Planning documents: `docs/architecture.md`, `docs/data-models.md`, `docs/implementation-plan.md`, `docs/feasibility-report.md`.
+
+## Support
+
+ContribFlow is free and open source. If you find it useful and would like to support ongoing development, you can buy me a coffee:
+
+- [Buy Me a Coffee](https://buymeacoffee.com/rabindra789)
+
+Contributions are completely optional and do not unlock any features. The extension will always remain free and local-first.

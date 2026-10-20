@@ -191,6 +191,16 @@ function DashboardReady({
           </button>
         </div>
         {notice !== null ? <Notice notice={notice} /> : null}
+        <footer className="mt-8 pt-4 border-t border-line">
+          <a
+            href="https://buymeacoffee.com/rabindra789"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium text-muted underline underline-offset-2 hover:text-ink transition-colors"
+          >
+            Support development ☕
+          </a>
+        </footer>
       </div>
     );
   }
@@ -352,6 +362,17 @@ function DashboardReady({
           ) : null}
         </>
       )}
+
+      <footer className="mt-8 pt-4 border-t border-line">
+        <a
+          href="https://buymeacoffee.com/rabindra789"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs font-medium text-muted underline underline-offset-2 hover:text-ink transition-colors"
+        >
+          Support development ☕
+        </a>
+      </footer>
     </div>
   );
 }

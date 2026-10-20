@@ -348,6 +348,25 @@ describe('dashboard', () => {
     expect(screen.getByRole('group', { name: 'Private notes: 0' })).toBeVisible();
   });
 
+  it('renders the support development link', async () => {
+    render(<DashboardApp client={createClient()} />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Your workspace is empty' }),
+    ).toBeVisible();
+
+    const supportLink = screen.getByRole('link', {
+      name: 'Support development ☕',
+    });
+    expect(supportLink).toBeVisible();
+    expect(supportLink).toHaveAttribute(
+      'href',
+      'https://buymeacoffee.com/rabindra789',
+    );
+    expect(supportLink).toHaveAttribute('target', '_blank');
+    expect(supportLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
   it('renders saved issues, tracked pull requests, counts, and warnings', async () => {
     const client = createClient({
       getSnapshot: vi
