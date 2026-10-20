@@ -226,15 +226,26 @@ describe('github HTTP failures', () => {
     expect(error.rateLimitResetAt).toBeUndefined();
   });
 
-  it('treats 403 without rate-limit headers as rate limited without timing', async () => {
+  it('maps a 403 without rate-limit evidence to an HTTP error', async () => {
     const stub = createFetchStub(new Response('', { status: 403 }));
+    const client = createGitHubClient({ fetch: stub.fetch });
+
+    const error = await expectGitHubError(client.fetchIssue(issueTarget), 'http');
+
+    expect(error.status).toBe(403);
+    expect(error.message).toContain('403');
+  });
+
+  it('treats a 403 with Retry-After as rate limited', async () => {
+    const stub = createFetchStub(
+      new Response('', { status: 403, headers: { 'retry-after': '45' } }),
+    );
     const client = createGitHubClient({ fetch: stub.fetch });
 
     const error = await expectGitHubError(client.fetchIssue(issueTarget), 'rate-limited');
 
     expect(error.status).toBe(403);
-    expect(error.retryAfterSeconds).toBeUndefined();
-    expect(error.rateLimitResetAt).toBeUndefined();
+    expect(error.retryAfterSeconds).toBe(45);
   });
 
   it('maps other statuses to a typed HTTP error', async () => {

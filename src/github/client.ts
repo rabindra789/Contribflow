@@ -113,16 +113,23 @@ export function createGitHubClient(options: GitHubClientOptions = {}): GitHubCli
 
     if (status === 403 || status === 429) {
       const rateLimit = parseRateLimitHeaders(response.headers, now());
-      const message =
-        rateLimit.retryAfterSeconds === null
-          ? 'GitHub rate limit reached. Try again later.'
-          : `GitHub rate limit reached. Try again in ${rateLimit.retryAfterSeconds} seconds.`;
+      const hasRateLimitEvidence =
+        status === 429 ||
+        rateLimit.remaining === 0 ||
+        response.headers.get('retry-after') !== null;
 
-      return new GitHubClientError('rate-limited', message, {
-        status,
-        retryAfterSeconds: rateLimit.retryAfterSeconds ?? undefined,
-        rateLimitResetAt: rateLimit.resetAt ?? undefined,
-      });
+      if (hasRateLimitEvidence) {
+        const message =
+          rateLimit.retryAfterSeconds === null
+            ? 'GitHub rate limit reached. Try again later.'
+            : `GitHub rate limit reached. Try again in ${rateLimit.retryAfterSeconds} seconds.`;
+
+        return new GitHubClientError('rate-limited', message, {
+          status,
+          retryAfterSeconds: rateLimit.retryAfterSeconds ?? undefined,
+          rateLimitResetAt: rateLimit.resetAt ?? undefined,
+        });
+      }
     }
 
     return new GitHubClientError('http', `GitHub returned HTTP ${status}.`, { status });
