@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Status: M0-M3 complete and under review. M4.1 (popup target/action workflow) is complete and under review. M4.2 (dashboard workspace, including link/counts, notes, filters, and live updates) is implemented. M5 dashboard deliverables are implemented under M4.2 and await review. M6 release hardening remains.
+Status: M0-M3 complete and under review. M4.1 (popup target/action workflow) is complete and under review. M4.2 (dashboard workspace, including link/counts, notes, filters, and live updates) is implemented. M5 (dashboard) is implemented and verified by automated tests; manual verification checks are pending. M6 release hardening remains.
 
 ## Ground rules
 
@@ -202,7 +202,7 @@ Status: implemented, awaiting review. Executed 2026-10-20. This expanded M4.2 be
 
 Depends on M4.
 
-Status: implemented as part of M4.2; awaiting review. The deliverables below are covered by the M4.2 dashboard workspace.
+Status: implemented and verified by automated tests (unit, component, E2E). All deliverables implemented. Manual verification checks (keyboard, contrast, narrow/full layout, browser restart, real Chrome smoke test) are pending.
 
 ### Deliverables
 
@@ -223,6 +223,17 @@ Status: implemented as part of M4.2; awaiting review. The deliverables below are
 - Invalid-record and orphan-note warnings are visible without deleting data.
 - Keyboard-only use is possible; focus order and contrast are checked.
 - Layout works at narrow popup-like widths and on a full dashboard tab.
+
+### Manual verification checklist (pending)
+
+- [ ] Keyboard-only navigation and focus order
+- [ ] Visible focus indicators
+- [ ] Contrast and non-color-only state indicators
+- [ ] Narrow and full dashboard widths
+- [ ] Browser-restart persistence
+- [ ] Network panel: note edits cause no GitHub API requests
+- [ ] Successful and failed dashboard issue refresh
+- [ ] Actual Chrome extension reload and smoke test
 
 ## M6 - End-to-end, hardening, release candidate
 

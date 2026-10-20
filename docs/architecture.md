@@ -1,6 +1,6 @@
 # ContribFlow Architecture
 
-Status: M1 foundation, M2 domain/persistence, M3 GitHub client/background commands, M4.1 popup target/action workflow, and M4.2 dashboard workspace are implemented. The dashboard loads and refreshes through the background command pipeline, and it subscribes to local storage changes while open. Release hardening (M6) remains.
+Status: M1 foundation, M2 domain/persistence, M3 GitHub client/background commands, M4.1 popup target/action workflow, M4.2 dashboard workspace, and M5 dashboard are implemented. The dashboard loads and refreshes through the background command pipeline, and it subscribes to local storage changes while open. Release hardening (M6) remains. Manual verification checks are pending.
 
 ## Goals
 

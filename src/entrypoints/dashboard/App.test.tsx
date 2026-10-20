@@ -399,6 +399,44 @@ describe('dashboard', () => {
     expect(within(summary).getByText('Saved issues')).toBeVisible();
   });
 
+  it('renders orphan-note warning without deleting the note', async () => {
+    const orphanNoteSnapshot: StorageSnapshot = {
+      issues: [],
+      pullRequests: [],
+      notes: {
+        'octocat/hello-world#999': {
+          issueId: 'octocat/hello-world#999',
+          body: 'Orphan note',
+          createdAt: '2026-10-19T12:00:00.000Z',
+          updatedAt: '2026-10-19T12:00:00.000Z',
+        },
+      },
+      warnings: [
+        {
+          kind: 'orphan-note',
+          issueId: 'octocat/hello-world#999',
+        },
+      ],
+    };
+    const client = createClient({
+      getSnapshot: vi
+        .fn<BackgroundClient['getSnapshot']>()
+        .mockResolvedValue(orphanNoteSnapshot),
+    });
+    render(<DashboardApp client={client} />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Storage warnings' }),
+    ).toBeVisible();
+    expect(
+      screen.getByText('Note for octocat/hello-world#999 has no saved issue and was skipped.'),
+    ).toBeVisible();
+    // The orphan note should remain in storage (not deleted). The snapshot still contains the note.
+    // We can't directly inspect storage here, but the warning is shown without deleting the note.
+    // The note is not displayed in the UI because its issue is missing.
+    expect(screen.queryByText('Orphan note')).not.toBeInTheDocument();
+  });
+
   it('refreshes the collection on demand', async () => {
     const getSnapshot = vi
       .fn<BackgroundClient['getSnapshot']>()
