@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Logo } from '@/components/Logo';
 import { AppShell } from '@/components/AppShell';
 import { secondaryButtonClass } from '@/components/dashboard/button-classes';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
@@ -395,6 +396,7 @@ export function DashboardApp({
       width="dashboard"
       title="ContribFlow Dashboard"
       subtitle="Saved issues, private notes, and tracked pull requests"
+      logo={<Logo width={20} height={20} />}
     >
       {workflow.state.status === 'loading' ? (
         <p className="text-sm text-muted" role="status">

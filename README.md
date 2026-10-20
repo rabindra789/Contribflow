@@ -1,5 +1,7 @@
 # ContribFlow
 
+![ContribFlow Logo](logo.svg)
+
 ContribFlow is a local-first Chrome (Manifest V3) extension for individual GitHub contributors. It saves GitHub issues, keeps one private note per saved issue, tracks pull requests, and shows everything in a local dashboard.
 
 The MVP is local: no account, no backend, no analytics, and no stored GitHub credentials.

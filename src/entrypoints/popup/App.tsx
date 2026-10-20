@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { AppShell } from '@/components/AppShell';
+import { Logo } from '@/components/Logo';
 import type { SavedIssue, TrackedPullRequest } from '../../domain/models';
 import {
   usePopupWorkflow,
@@ -263,6 +264,7 @@ export function PopupApp({ client, detectTarget, dashboardUrl }: PopupAppProps) 
       width="popup"
       title="ContribFlow"
       subtitle="Issues and pull requests you are working on"
+      logo={<Logo width={16} height={16} />}
     >
       <div className="max-h-[520px] space-y-3 overflow-y-auto">
         {state.status === 'loading' ? (
