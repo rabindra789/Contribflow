@@ -1,5 +1,10 @@
 import { browser } from 'wxt/browser';
-import { isCanonicalTargetId, type SavedIssue, type TrackedPullRequest } from '../domain/models';
+import {
+  isCanonicalTargetId,
+  type IsoTimestamp,
+  type SavedIssue,
+  type TrackedPullRequest,
+} from '../domain/models';
 import {
   parseIssueNote,
   parseSavedIssue,
@@ -13,11 +18,13 @@ import {
   isCommandResult,
   type Command,
   type CommandError,
+  type DeleteNoteData,
   type RefreshIssueData,
   type RefreshPullRequestData,
   type RemoveIssueData,
   type RemovePullRequestData,
   type SaveIssueData,
+  type SaveNoteData,
   type TrackPullRequestData,
 } from './contracts';
 
@@ -243,6 +250,33 @@ function parseRemovePullRequestData(
   return pullRequestId === null ? null : { pullRequestId };
 }
 
+function parseSaveNoteData(
+  value: unknown,
+  expectedIssueId: string,
+  expectedUpdatedAt: IsoTimestamp | null,
+): SaveNoteData | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const parsed = parseIssueNote((value as Record<string, unknown>).note);
+  if (
+    !parsed.ok ||
+    parsed.value.issueId !== expectedIssueId ||
+    (expectedUpdatedAt !== null && parsed.value.updatedAt <= expectedUpdatedAt)
+  ) {
+    return null;
+  }
+  return { note: parsed.value };
+}
+
+function parseDeleteNoteData(
+  value: unknown,
+  expectedIssueId: string,
+): DeleteNoteData | null {
+  const issueId = parseRemovedId(value, 'issueId', expectedIssueId);
+  return issueId === null ? null : { issueId };
+}
+
 export type BackgroundSendMessage = (command: Command) => Promise<unknown>;
 
 export interface BackgroundClientOptions {
@@ -254,6 +288,15 @@ export interface BackgroundClient {
   saveIssue(url: string): Promise<SaveIssueData>;
   refreshIssue(url: string): Promise<RefreshIssueData>;
   removeIssue(issueId: string): Promise<RemoveIssueData>;
+  saveNote(
+    issueId: string,
+    body: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ): Promise<SaveNoteData>;
+  deleteNote(
+    issueId: string,
+    expectedUpdatedAt: IsoTimestamp | null,
+  ): Promise<DeleteNoteData>;
   trackPullRequest(url: string): Promise<TrackPullRequestData>;
   refreshPullRequest(url: string): Promise<RefreshPullRequestData>;
   removePullRequest(pullRequestId: string): Promise<RemovePullRequestData>;
@@ -315,6 +358,20 @@ export function createBackgroundClient(
     removeIssue(issueId) {
       return request({ type: 'REMOVE_ISSUE', issueId }, (value) =>
         parseRemoveIssueData(value, issueId),
+      );
+    },
+
+    saveNote(issueId, body, expectedUpdatedAt) {
+      return request(
+        { type: 'SAVE_NOTE', issueId, body, expectedUpdatedAt },
+        (value) => parseSaveNoteData(value, issueId, expectedUpdatedAt),
+      );
+    },
+
+    deleteNote(issueId, expectedUpdatedAt) {
+      return request(
+        { type: 'DELETE_NOTE', issueId, expectedUpdatedAt },
+        (value) => parseDeleteNoteData(value, issueId),
       );
     },
 

@@ -543,7 +543,12 @@ describe('notes', () => {
     const { handler, repository, clock } = await setup({ issues: [savedIssue()] });
 
     const created = expectSuccess<SaveNoteData>(
-      await handler.handle({ type: 'SAVE_NOTE', issueId: ISSUE_ID, body: 'First note' }),
+      await handler.handle({
+        type: 'SAVE_NOTE',
+        issueId: ISSUE_ID,
+        body: 'First note',
+        expectedUpdatedAt: null,
+      }),
     );
 
     expect(created.note).toEqual({
@@ -560,6 +565,7 @@ describe('notes', () => {
         type: 'SAVE_NOTE',
         issueId: ISSUE_ID,
         body: 'Second note',
+        expectedUpdatedAt: NOW.toISOString(),
       }),
     );
 
@@ -576,23 +582,108 @@ describe('notes', () => {
     const { handler, repository } = await setup();
 
     const error = expectFailure(
-      await handler.handle({ type: 'SAVE_NOTE', issueId: ISSUE_ID, body: 'Note' }),
+      await handler.handle({
+        type: 'SAVE_NOTE',
+        issueId: ISSUE_ID,
+        body: 'Note',
+        expectedUpdatedAt: null,
+      }),
     );
 
     expect(error.code).toBe('storage-missing-issue');
     expect((await loadSnapshot(repository)).notes).toEqual({});
   });
 
-  it('deletes notes idempotently', async () => {
+  it('rejects note writes based on a stale snapshot', async () => {
+    const existing = issueNote();
     const { handler, repository } = await setup({
       issues: [savedIssue()],
-      notes: [issueNote()],
+      notes: [existing],
     });
 
-    const result = await handler.handle({ type: 'DELETE_NOTE', issueId: ISSUE_ID });
-    expectSuccess(result);
+    const updateError = expectFailure(
+      await handler.handle({
+        type: 'SAVE_NOTE',
+        issueId: ISSUE_ID,
+        body: 'Stale overwrite',
+        expectedUpdatedAt: '2026-10-19T10:01:00.000Z',
+      }),
+    );
+    expect(updateError.code).toBe('note-conflict');
+    expect((await loadSnapshot(repository)).notes[ISSUE_ID]).toEqual(existing);
 
+    const createError = expectFailure(
+      await handler.handle({
+        type: 'SAVE_NOTE',
+        issueId: ISSUE_ID,
+        body: 'Duplicate note',
+        expectedUpdatedAt: null,
+      }),
+    );
+    expect(createError.code).toBe('note-conflict');
+    expect((await loadSnapshot(repository)).notes[ISSUE_ID]).toEqual(existing);
+  });
+
+  it('advances the note revision when saves share a timestamp', async () => {
+    const { handler, repository } = await setup({ issues: [savedIssue()] });
+
+    const created = expectSuccess<SaveNoteData>(
+      await handler.handle({
+        type: 'SAVE_NOTE',
+        issueId: ISSUE_ID,
+        body: 'First note',
+        expectedUpdatedAt: null,
+      }),
+    );
+    const updated = expectSuccess<SaveNoteData>(
+      await handler.handle({
+        type: 'SAVE_NOTE',
+        issueId: ISSUE_ID,
+        body: 'Second note',
+        expectedUpdatedAt: created.note.updatedAt,
+      }),
+    );
+
+    expect(updated.note.createdAt).toBe(created.note.createdAt);
+    expect(updated.note.updatedAt).toBe('2026-10-20T12:00:00.001Z');
+    expect((await loadSnapshot(repository)).notes[ISSUE_ID]).toEqual(
+      updated.note,
+    );
+  });
+
+  it('deletes notes idempotently and rejects stale deletions', async () => {
+    const existing = issueNote();
+    const { handler, repository } = await setup({
+      issues: [savedIssue()],
+      notes: [existing],
+    });
+
+    const stale = expectFailure(
+      await handler.handle({
+        type: 'DELETE_NOTE',
+        issueId: ISSUE_ID,
+        expectedUpdatedAt: '2026-10-19T10:01:00.000Z',
+      }),
+    );
+    expect(stale.code).toBe('note-conflict');
+    expect((await loadSnapshot(repository)).notes[ISSUE_ID]).toEqual(existing);
+
+    expectSuccess(
+      await handler.handle({
+        type: 'DELETE_NOTE',
+        issueId: ISSUE_ID,
+        expectedUpdatedAt: existing.updatedAt,
+      }),
+    );
     expect((await loadSnapshot(repository)).notes).toEqual({});
+
+    expectSuccess(
+      await handler.handle({
+        type: 'DELETE_NOTE',
+        issueId: ISSUE_ID,
+        expectedUpdatedAt: existing.updatedAt,
+      }),
+    );
   });
 });
 

@@ -88,6 +88,13 @@ function missingIssueError(): CommandError {
   return createCommandError('storage-missing-issue', 'The issue is no longer saved.');
 }
 
+function noteConflictError(): CommandError {
+  return createCommandError(
+    'note-conflict',
+    'This note changed in another view. Refresh the collection before trying again.',
+  );
+}
+
 export function createCommandHandler(options: CommandHandlerOptions): CommandHandler {
   const { repository, github } = options;
   const now = options.now ?? (() => new Date());
@@ -334,8 +341,25 @@ export function createCommandHandler(options: CommandHandlerOptions): CommandHan
     }
 
     const existing = snapshot.notes[command.issueId];
+    if (
+      command.expectedUpdatedAt === null
+        ? existing !== undefined
+        : existing === undefined ||
+          existing.updatedAt !== command.expectedUpdatedAt
+    ) {
+      throw new CommandFailureSignal(noteConflictError());
+    }
+
     const createdAt = existing?.createdAt ?? timestamp;
-    const updatedAt = createdAt > timestamp ? createdAt : timestamp;
+    const updatedAt =
+      existing === undefined
+        ? timestamp
+        : new Date(
+            Math.max(
+              Date.parse(timestamp),
+              Date.parse(existing.updatedAt) + 1,
+            ),
+          ).toISOString();
     const note: IssueNote = {
       issueId: command.issueId,
       body: command.body,
@@ -344,6 +368,24 @@ export function createCommandHandler(options: CommandHandlerOptions): CommandHan
     };
     await repository.saveNote(note);
     return commandSuccess({ note });
+  }
+
+  async function deleteNote(
+    command: Extract<Command, { type: 'DELETE_NOTE' }>,
+  ): Promise<CommandResult<DeleteNoteData>> {
+    const snapshot = await requireSnapshot();
+    const existing = snapshot.notes[command.issueId];
+    if (
+      existing !== undefined &&
+      (command.expectedUpdatedAt === null ||
+        existing.updatedAt !== command.expectedUpdatedAt)
+    ) {
+      throw new CommandFailureSignal(noteConflictError());
+    }
+
+    await repository.removeNote(command.issueId);
+    const data: DeleteNoteData = { issueId: command.issueId };
+    return commandSuccess(data);
   }
 
   async function dispatch(command: Command, timestamp: string): Promise<CommandResponse> {
@@ -368,11 +410,8 @@ export function createCommandHandler(options: CommandHandlerOptions): CommandHan
       case 'SAVE_NOTE':
         return saveNote(command, timestamp);
 
-      case 'DELETE_NOTE': {
-        await repository.removeNote(command.issueId);
-        const data: DeleteNoteData = { issueId: command.issueId };
-        return commandSuccess(data);
-      }
+      case 'DELETE_NOTE':
+        return deleteNote(command);
 
       case 'TRACK_PULL_REQUEST':
         return trackPullRequest(command, timestamp);

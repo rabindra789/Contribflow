@@ -2,11 +2,16 @@ import { parseGitHubUrl } from '../domain/github-url';
 import {
   MAX_NOTE_BODY_LENGTH,
   isCanonicalTargetId,
+  type IsoTimestamp,
   type IssueNote,
   type SavedIssue,
   type TrackedPullRequest,
 } from '../domain/models';
-import { isPlainRecord, isValidNoteBody } from '../domain/validation';
+import {
+  isCanonicalTimestamp,
+  isPlainRecord,
+  isValidNoteBody,
+} from '../domain/validation';
 import type { StorageSnapshot } from '../storage/repository';
 
 export const COMMAND_TYPES = [
@@ -40,6 +45,7 @@ export type CommandErrorCode =
   | 'storage-schema'
   | 'storage-missing-issue'
   | 'storage-error'
+  | 'note-conflict'
   | 'internal';
 
 export interface CommandError {
@@ -77,11 +83,13 @@ export interface SaveNoteCommand {
   type: 'SAVE_NOTE';
   issueId: string;
   body: string;
+  expectedUpdatedAt: IsoTimestamp | null;
 }
 
 export interface DeleteNoteCommand {
   type: 'DELETE_NOTE';
   issueId: string;
+  expectedUpdatedAt: IsoTimestamp | null;
 }
 
 export interface TrackPullRequestCommand {
@@ -262,6 +270,31 @@ function parseIdentifier(
   return { ok: true, id };
 }
 
+function parseExpectedUpdatedAt(
+  value: Record<string, unknown>,
+): { ok: true; expectedUpdatedAt: IsoTimestamp | null } | { ok: false; error: CommandError } {
+  if (!Object.prototype.hasOwnProperty.call(value, 'expectedUpdatedAt')) {
+    return {
+      ok: false,
+      error: createCommandError(
+        'invalid-command',
+        'The expectedUpdatedAt field is required.',
+      ),
+    };
+  }
+  const expectedUpdatedAt = value.expectedUpdatedAt;
+  if (expectedUpdatedAt !== null && !isCanonicalTimestamp(expectedUpdatedAt)) {
+    return {
+      ok: false,
+      error: createCommandError(
+        'invalid-command',
+        'The expectedUpdatedAt field must be null or a canonical timestamp.',
+      ),
+    };
+  }
+  return { ok: true, expectedUpdatedAt };
+}
+
 /**
  * Validates an untrusted runtime message before it reaches repository or
  * network code. Extra fields are rejected to keep the wire contract explicit.
@@ -294,24 +327,53 @@ export function parseCommandMessage(input: unknown): CommandParseResult {
       return parseUrlCommand(input, type);
     }
 
-    case 'REMOVE_ISSUE':
-    case 'DELETE_NOTE': {
+    case 'REMOVE_ISSUE': {
       if (!hasOnlyKeys(input, ['type', 'issueId'])) {
-        return invalidCommand(`${type} only accepts type and issueId fields.`);
+        return invalidCommand('REMOVE_ISSUE only accepts type and issueId fields.');
       }
       const parsed = parseIdentifier(input, 'issueId');
       if (!parsed.ok) {
         return { ok: false, error: parsed.error };
       }
-      if (type === 'REMOVE_ISSUE') {
-        return { ok: true, command: { type: 'REMOVE_ISSUE', issueId: parsed.id } };
+      return { ok: true, command: { type: 'REMOVE_ISSUE', issueId: parsed.id } };
+    }
+
+    case 'DELETE_NOTE': {
+      if (!hasOnlyKeys(input, ['type', 'issueId', 'expectedUpdatedAt'])) {
+        return invalidCommand(
+          'DELETE_NOTE only accepts type, issueId, and expectedUpdatedAt fields.',
+        );
       }
-      return { ok: true, command: { type: 'DELETE_NOTE', issueId: parsed.id } };
+      const parsed = parseIdentifier(input, 'issueId');
+      if (!parsed.ok) {
+        return { ok: false, error: parsed.error };
+      }
+      const expected = parseExpectedUpdatedAt(input);
+      if (!expected.ok) {
+        return { ok: false, error: expected.error };
+      }
+      return {
+        ok: true,
+        command: {
+          type: 'DELETE_NOTE',
+          issueId: parsed.id,
+          expectedUpdatedAt: expected.expectedUpdatedAt,
+        },
+      };
     }
 
     case 'SAVE_NOTE': {
-      if (!hasOnlyKeys(input, ['type', 'issueId', 'body'])) {
-        return invalidCommand('SAVE_NOTE only accepts type, issueId, and body fields.');
+      if (
+        !hasOnlyKeys(input, [
+          'type',
+          'issueId',
+          'body',
+          'expectedUpdatedAt',
+        ])
+      ) {
+        return invalidCommand(
+          'SAVE_NOTE only accepts type, issueId, body, and expectedUpdatedAt fields.',
+        );
       }
       const parsed = parseIdentifier(input, 'issueId');
       if (!parsed.ok) {
@@ -323,7 +385,19 @@ export function parseCommandMessage(input: unknown): CommandParseResult {
           `The body field must contain 1-${MAX_NOTE_BODY_LENGTH} UTF-16 code units after trimming.`,
         );
       }
-      return { ok: true, command: { type, issueId: parsed.id, body } };
+      const expected = parseExpectedUpdatedAt(input);
+      if (!expected.ok) {
+        return { ok: false, error: expected.error };
+      }
+      return {
+        ok: true,
+        command: {
+          type: 'SAVE_NOTE',
+          issueId: parsed.id,
+          body,
+          expectedUpdatedAt: expected.expectedUpdatedAt,
+        },
+      };
     }
 
     case 'REMOVE_PULL_REQUEST': {
@@ -358,6 +432,7 @@ const COMMAND_ERROR_CODES: readonly CommandErrorCode[] = [
   'storage-schema',
   'storage-missing-issue',
   'storage-error',
+  'note-conflict',
   'internal',
 ];
 

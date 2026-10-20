@@ -18,8 +18,13 @@ const validCommands: Command[] = [
   { type: 'SAVE_ISSUE', url: issueUrl },
   { type: 'REFRESH_ISSUE', url: issueUrl },
   { type: 'REMOVE_ISSUE', issueId },
-  { type: 'SAVE_NOTE', issueId, body: 'Remember the edge cases.' },
-  { type: 'DELETE_NOTE', issueId },
+  {
+    type: 'SAVE_NOTE',
+    issueId,
+    body: 'Remember the edge cases.',
+    expectedUpdatedAt: null,
+  },
+  { type: 'DELETE_NOTE', issueId, expectedUpdatedAt: null },
   { type: 'TRACK_PULL_REQUEST', url: pullRequestUrl },
   { type: 'REFRESH_PULL_REQUEST', url: pullRequestUrl },
   { type: 'REMOVE_PULL_REQUEST', pullRequestId: issueId },
@@ -106,20 +111,112 @@ describe('command parsing', () => {
   });
 
   it('rejects invalid note bodies', () => {
-    expectInvalid({ type: 'SAVE_NOTE', issueId });
-    expectInvalid({ type: 'SAVE_NOTE', issueId, body: 42 });
-    expectInvalid({ type: 'SAVE_NOTE', issueId, body: '' });
-    expectInvalid({ type: 'SAVE_NOTE', issueId, body: '   \n\t  ' });
-    expectInvalid({ type: 'SAVE_NOTE', issueId, body: 'x'.repeat(20001) });
-    expectInvalid({ type: 'SAVE_NOTE', issueId: 'invalid', body: 'note' });
-    expectInvalid({ type: 'SAVE_NOTE', issueId, body: 'note', extra: true });
+    expectInvalid({ type: 'SAVE_NOTE', issueId, expectedUpdatedAt: null });
+    expectInvalid({
+      type: 'SAVE_NOTE',
+      issueId,
+      body: 42,
+      expectedUpdatedAt: null,
+    });
+    expectInvalid({
+      type: 'SAVE_NOTE',
+      issueId,
+      body: '',
+      expectedUpdatedAt: null,
+    });
+    expectInvalid({
+      type: 'SAVE_NOTE',
+      issueId,
+      body: '   \n\t  ',
+      expectedUpdatedAt: null,
+    });
+    expectInvalid({
+      type: 'SAVE_NOTE',
+      issueId,
+      body: 'x'.repeat(20001),
+      expectedUpdatedAt: null,
+    });
+    expectInvalid({
+      type: 'SAVE_NOTE',
+      issueId: 'invalid',
+      body: 'note',
+      expectedUpdatedAt: null,
+    });
+    expectInvalid({
+      type: 'SAVE_NOTE',
+      issueId,
+      body: 'note',
+      expectedUpdatedAt: null,
+      extra: true,
+    });
+  });
+
+  it('requires a null or canonical note revision token', () => {
+    const issuedAt = '2026-10-19T09:25:00.000Z';
+    expectInvalid({ type: 'SAVE_NOTE', issueId, body: 'note' });
+    expectInvalid({
+      type: 'SAVE_NOTE',
+      issueId,
+      body: 'note',
+      expectedUpdatedAt: 'tomorrow',
+    });
+    expectInvalid({
+      type: 'SAVE_NOTE',
+      issueId,
+      body: 'note',
+      expectedUpdatedAt: '2026-10-19T09:25:00Z',
+    });
+    expectInvalid({ type: 'DELETE_NOTE', issueId });
+    expectInvalid({
+      type: 'DELETE_NOTE',
+      issueId,
+      expectedUpdatedAt: 42,
+    });
+
+    expect(
+      parseCommandMessage({
+        type: 'SAVE_NOTE',
+        issueId,
+        body: 'note',
+        expectedUpdatedAt: issuedAt,
+      }),
+    ).toEqual({
+      ok: true,
+      command: {
+        type: 'SAVE_NOTE',
+        issueId,
+        body: 'note',
+        expectedUpdatedAt: issuedAt,
+      },
+    });
+    expect(
+      parseCommandMessage({
+        type: 'DELETE_NOTE',
+        issueId,
+        expectedUpdatedAt: issuedAt,
+      }),
+    ).toEqual({
+      ok: true,
+      command: {
+        type: 'DELETE_NOTE',
+        issueId,
+        expectedUpdatedAt: issuedAt,
+      },
+    });
   });
 
   it('preserves note body whitespace while validating trimmed content', () => {
     const body = '  keep surrounding spaces  ';
-    expect(parseCommandMessage({ type: 'SAVE_NOTE', issueId, body })).toEqual({
+    expect(
+      parseCommandMessage({
+        type: 'SAVE_NOTE',
+        issueId,
+        body,
+        expectedUpdatedAt: null,
+      }),
+    ).toEqual({
       ok: true,
-      command: { type: 'SAVE_NOTE', issueId, body },
+      command: { type: 'SAVE_NOTE', issueId, body, expectedUpdatedAt: null },
     });
   });
 

@@ -94,6 +94,8 @@ function createClient(overrides: Partial<BackgroundClient> = {}): BackgroundClie
     saveIssue: vi.fn<BackgroundClient['saveIssue']>(),
     refreshIssue: vi.fn<BackgroundClient['refreshIssue']>(),
     removeIssue: vi.fn<BackgroundClient['removeIssue']>(),
+    saveNote: vi.fn<BackgroundClient['saveNote']>(),
+    deleteNote: vi.fn<BackgroundClient['deleteNote']>(),
     trackPullRequest: vi.fn<BackgroundClient['trackPullRequest']>(),
     refreshPullRequest: vi.fn<BackgroundClient['refreshPullRequest']>(),
     removePullRequest: vi.fn<BackgroundClient['removePullRequest']>(),

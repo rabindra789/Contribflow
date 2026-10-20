@@ -269,6 +269,68 @@ describe('background client', () => {
     expect(error.reason).toBe('invalid-response');
   });
 
+  it('saves and deletes notes through the typed commands', async () => {
+    const save = setup({ ok: true, data: { note } });
+    await expect(
+      save.client.saveNote(issue.id, note.body, null),
+    ).resolves.toEqual({ note });
+    expect(save.sendMessage).toHaveBeenCalledWith({
+      type: 'SAVE_NOTE',
+      issueId: issue.id,
+      body: note.body,
+      expectedUpdatedAt: null,
+    });
+
+    const updatedNote = {
+      ...note,
+      body: 'Updated note',
+      updatedAt: '2026-10-19T09:26:00.000Z',
+    };
+    const update = setup({ ok: true, data: { note: updatedNote } });
+    await expect(
+      update.client.saveNote(issue.id, updatedNote.body, note.updatedAt),
+    ).resolves.toEqual({ note: updatedNote });
+    expect(update.sendMessage).toHaveBeenCalledWith({
+      type: 'SAVE_NOTE',
+      issueId: issue.id,
+      body: updatedNote.body,
+      expectedUpdatedAt: note.updatedAt,
+    });
+
+    const remove = setup({ ok: true, data: { issueId: issue.id } });
+    await expect(
+      remove.client.deleteNote(issue.id, updatedNote.updatedAt),
+    ).resolves.toEqual({ issueId: issue.id });
+    expect(remove.sendMessage).toHaveBeenCalledWith({
+      type: 'DELETE_NOTE',
+      issueId: issue.id,
+      expectedUpdatedAt: updatedNote.updatedAt,
+    });
+  });
+
+  it('rejects malformed or stale note responses', async () => {
+    const cases: unknown[] = [
+      null,
+      { note: null },
+      { note: { ...note, issueId: 'octocat/hello-world#1' } },
+      { note: { ...note, issueId: issue.id, updatedAt: note.updatedAt } },
+    ];
+    for (const data of cases) {
+      const { client } = setup({ ok: true, data });
+      const error = await captureError(
+        client.saveNote(issue.id, 'Note', note.updatedAt),
+      );
+      expect(error.reason).toBe('invalid-response');
+    }
+
+    const remove = setup({
+      ok: true,
+      data: { issueId: 'octocat/hello-world#1' },
+    });
+    const error = await captureError(remove.client.deleteNote(issue.id, null));
+    expect(error.reason).toBe('invalid-response');
+  });
+
   it('does not log command content or responses', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
